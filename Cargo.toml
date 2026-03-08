@@ -1,0 +1,10 @@
+[package]
+name = "signal"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.30.0"
+reqwest = "0.13.2"
+serde = "1.0.228"
+tokio = "1.50.0"
