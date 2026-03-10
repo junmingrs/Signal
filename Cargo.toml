@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+color-eyre = "0.6.5"
+jiff = "0.2.23"
 ratatui = "0.30.0"
 reqwest = "0.13.2"
+rss = "2.0.12"
+scraper = "0.25.0"
 serde = "1.0.228"
-tokio = "1.50.0"
+serde-xml-rs = "0.8.2"
+tokio = { version = "1.50.0", features = ["rt-multi-thread"]}
