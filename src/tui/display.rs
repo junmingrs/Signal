@@ -8,9 +8,7 @@ use ratatui::{
     },
     layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
-    widgets::{
-        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarState, Wrap,
-    },
+    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
 use tokio::runtime::Runtime;
 
@@ -33,10 +31,9 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     let items = rt.block_on(fetch_news());
     let mut news_app = news::News::new(items);
     let mut focused: Focused = Focused::Left;
-    let mut max_scroll: u16 = 0;
     loop {
         terminal.draw(|frame| {
-            max_scroll = render(frame, &tab, &mut news_app, &rt);
+            render(frame, &tab, &mut news_app, &rt);
         })?;
         if crossterm::event::poll(Duration::from_millis(500))? {
             if let Event::Key(key) = event::read()? {
@@ -59,7 +56,7 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                     Some('l') => focused = Focused::Right,
                     Some('j') => match focused {
                         Focused::Left => news_app.next(),
-                        Focused::Right => news_app.scroll_down(max_scroll),
+                        Focused::Right => news_app.scroll_down(),
                     },
                     Some('k') => match focused {
                         Focused::Left => news_app.previous(),
@@ -114,13 +111,7 @@ fn testing_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
     );
 }
 
-/// Returns the max scroll offset for the current content.
-fn render(
-    frame: &mut Frame,
-    tab: &Tab,
-    news_app: &mut News,
-    rt: &Runtime,
-) -> u16 {
+fn render(frame: &mut Frame, tab: &Tab, news_app: &mut News, rt: &Runtime) {
     let base_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints(vec![Constraint::Percentage(20), Constraint::Percentage(80)])
@@ -160,32 +151,32 @@ fn render(
     .block(Block::default().borders(Borders::ALL));
     frame.render_stateful_widget(list, bottom_layout[0], &mut news_app.state);
 
-    let mut max_scroll: u16 = 0;
-
     if let Some(i) = news_app.state.selected() {
         match &news_app.items[i].content {
             Some(content) => {
-                // Inner width of the right panel (subtract 1 for the scrollbar column)
-                let inner_width = bottom_layout[1].width.saturating_sub(1);
                 let viewport_height = bottom_layout[1].height;
-
-                // Compute total wrapped line count across all paragraphs.
-                // Paragraphs are separated by a blank line (\n\n), so add 1 extra line
-                // between each paragraph (n-1 separators).
+                let inner_width = bottom_layout[1].width.saturating_sub(1);
                 let total_lines: u16 = content
                     .iter()
                     .map(|c| count_wrapped_lines(c, inner_width))
                     .sum::<u16>()
                     + (content.len().saturating_sub(1) as u16);
+                let max_scroll: u16;
+                match news_app.max_scroll_offsets.get(&i) {
+                    Some(scroll_offset) => {
+                        max_scroll = *scroll_offset;
+                    }
+                    None => {
+                        // Max scroll: how many lines we can scroll before the last line hits bottom
+                        max_scroll = total_lines.saturating_sub(viewport_height);
+                        news_app.max_scroll_offsets.insert(i, max_scroll);
 
-                // Max scroll: how many lines we can scroll before the last line hits bottom
-                max_scroll = total_lines.saturating_sub(viewport_height);
-
-                // Clamp scroll_offset in case content changed
-                if news_app.scroll_offset > max_scroll {
-                    news_app.scroll_offset = max_scroll;
+                        // Clamp scroll_offset in case content changed
+                        if news_app.scroll_offset > max_scroll {
+                            news_app.scroll_offset = max_scroll;
+                        }
+                    }
                 }
-
                 let joined = content.join("\n\n");
                 frame.render_widget(
                     Paragraph::new(joined)
@@ -207,6 +198,4 @@ fn render(
             }
         }
     }
-
-    max_scroll
 }

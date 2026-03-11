@@ -1,7 +1,3 @@
-// uses CNA's RSS feeds
-
-use std::fs;
-
 use rss::Channel;
 use scraper::{Html, Selector};
 
@@ -95,7 +91,6 @@ impl CNA {
         Html::parse_document(xml_response)
     }
     pub fn get_content(document: Html) -> Vec<String> {
-        // TODO:
         let selector = Selector::parse(r#"section[data-title="Content"] div.text-long p"#).unwrap();
         document
             .select(&selector)

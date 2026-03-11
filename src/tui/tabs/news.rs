@@ -1,6 +1,8 @@
 // render list
 // render content
 
+use std::collections::HashMap;
+
 use crate::utils::cna_model::CNAModel;
 use ratatui::widgets::ListState;
 
@@ -13,6 +15,7 @@ pub struct News {
     pub items: Vec<CNAModel>,
     pub state: ListState,
     pub scroll_offset: u16,
+    pub max_scroll_offsets: HashMap<usize, u16>,
 }
 
 impl News {
@@ -23,6 +26,7 @@ impl News {
             items,
             state,
             scroll_offset: 0,
+            max_scroll_offsets: HashMap::<usize, u16>::new(),
         }
     }
     pub fn next(&mut self) {
@@ -53,9 +57,18 @@ impl News {
         self.state.select(Some(i));
         self.scroll_offset = 0;
     }
-    pub fn scroll_down(&mut self, max: u16) {
-        if self.scroll_offset < max {
-            self.scroll_offset += 1;
+    pub fn scroll_down(&mut self) {
+        if let Some(i) = self.state.selected() {
+            if let Some(max) = self.max_scroll_offsets.get(&i) {
+                if self.scroll_offset < *max { // why cant it compare u16 with &u16
+                    self.scroll_offset += 1;
+                }
+            }
+            // if let Some(max) = self.max_scroll_offsets[i] {
+            //     if self.scroll_offset < max {
+            //         self.scroll_offset += 1
+            //     }
+            // }
         }
     }
     pub fn scroll_up(&mut self) {
