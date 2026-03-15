@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CNAModel {
     pub title: String,
     pub description: String,

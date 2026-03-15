@@ -4,81 +4,116 @@ use ratatui::{
     DefaultTerminal, Frame,
     crossterm::{
         self,
-        event::{self, Event},
+        event::{self, Event, KeyCode, KeyModifiers},
     },
     layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarState, Wrap},
+    widgets::{
+        Block, Borders, List, ListItem, Padding, Paragraph, Scrollbar, ScrollbarState, Wrap,
+    },
 };
-use tokio::runtime::Runtime;
+use ratatui_textarea::TextArea;
 
 use crate::{
-    services::cna::{CNA, NewsCategory},
-    tui::tabs::news::{self, Focused, News},
-    utils::cna_model::CNAModel,
+    services::cna::NewsCategory,
+    tui::app::{App, Focused, Mode, Tab},
+    utils::fuzzy::fuzzy_match,
 };
 
-#[derive(PartialEq)]
-pub enum Tab {
-    News,
-    Papers,
-    Custom,
-}
-
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
-    let mut tab = Tab::News;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let items = rt.block_on(fetch_news());
-    let mut news_app = news::News::new(items);
-    let mut focused: Focused = Focused::Left;
+    // setup app
+    let mut app = App::new();
+    app.news_app.items = app
+        .tokio_runtime
+        .block_on(app.news_app.fetch_news(NewsCategory::Latest));
+    let mut items_index = Vec::new();
+    for i in 0..app.news_app.items.len() {
+        items_index.push(i);
+    }
+    app.news_app.display_items = items_index;
+    // setup search area
+    let mut search_area = TextArea::default();
+    search_area.set_block(Block::default().borders(Borders::ALL));
     loop {
         terminal.draw(|frame| {
-            render(frame, &tab, &mut news_app, &rt);
+            render(frame, &mut app, &search_area);
         })?;
         if crossterm::event::poll(Duration::from_millis(500))? {
             if let Event::Key(key) = event::read()? {
-                match key.code.as_char() {
-                    Some('1') => tab = Tab::News,
-                    Some('2') => tab = Tab::Papers,
-                    Some('3') => tab = Tab::Custom,
-                    Some('4') => fs::write(
-                        "output.txt",
-                        news_app.items[news_app.state.selected().clone().unwrap()]
-                            .content
-                            .clone()
-                            .unwrap()
-                            .iter()
-                            .map(|x| x.to_string())
-                            .collect::<String>(),
-                    )
-                    .unwrap(),
-                    Some('h') => focused = Focused::Left,
-                    Some('l') => focused = Focused::Right,
-                    Some('j') => match focused {
-                        Focused::Left => news_app.next(),
-                        Focused::Right => news_app.scroll_down(),
+                if key.code.is_esc() {
+                    app.mode = Mode::Normal
+                }
+                match app.mode {
+                    Mode::Insert => {
+                        // disables newline by blocking control and enter
+                        match key.modifiers {
+                            KeyModifiers::CONTROL => {
+                                continue;
+                            }
+                            _ => {}
+                        }
+                        match key.code {
+                            KeyCode::Enter => {
+                                continue;
+                            }
+                            // prevent reloading when search area is empty
+                            KeyCode::Backspace => {
+                                if search_area.is_empty() {
+                                    continue;
+                                }
+                            }
+                            _ => {}
+                        }
+                        search_area.input(key);
+                        let mut results = fuzzy_match(
+                            search_area.lines().join("").to_string(),
+                            app.news_app.items.clone(),
+                        );
+                        results.sort_by_key(|(s, _, _)| *s);
+                        results.reverse();
+                        app.news_app.display_items =
+                            results.iter().map(|(_, _, i)| i.clone()).collect();
+                        if search_area.is_empty() {
+                            app.news_app.reset_display_items();
+                        }
+                        app.news_app.update_state();
+                        // fs::write("output.txt", format!("{:#?}", results)).unwrap();
+                    }
+                    Mode::Normal => match key.code.as_char() {
+                        Some('1') => app.tab = Tab::News,
+                        Some('2') => app.tab = Tab::Papers,
+                        Some('3') => app.tab = Tab::Custom,
+                        Some('4') => fs::write(
+                            "output.txt",
+                            app.news_app.items[app.news_app.state.selected().clone().unwrap()]
+                                .content
+                                .clone()
+                                .unwrap()
+                                .iter()
+                                .map(|x| x.to_string())
+                                .collect::<String>(),
+                        )
+                        .unwrap(),
+                        Some('i') => app.mode = Mode::Insert,
+                        Some('v') => app.mode = Mode::Visual,
+                        Some('h') => app.focused = Focused::Left,
+                        Some('l') => app.focused = Focused::Right,
+                        Some('j') => match app.focused {
+                            Focused::Left => app.news_app.next(),
+                            Focused::Right => app.news_app.scroll_down(),
+                        },
+                        Some('k') => match app.focused {
+                            Focused::Left => app.news_app.previous(),
+                            Focused::Right => app.news_app.scroll_up(),
+                        },
+                        Some('q') => break Ok(()),
+                        _ => {}
                     },
-                    Some('k') => match focused {
-                        Focused::Left => news_app.previous(),
-                        Focused::Right => news_app.scroll_up(),
-                    },
-                    Some('q') => break Ok(()),
-                    _ => {}
+                    Mode::Visual => {}
                 }
             }
         }
     }
-}
-
-pub async fn fetch_news() -> Vec<CNAModel> {
-    let xml_response = CNA::fetch_category(NewsCategory::Latest).await;
-    CNA::parse(xml_response.clone())
-}
-
-pub async fn fetch_content(cna_model: &CNAModel) -> Vec<String> {
-    let xml_response = CNA::fetch_page(&cna_model.link).await;
-    let document = CNA::webscrape(&xml_response);
-    CNA::get_content(document)
 }
 
 fn count_wrapped_lines(text: &str, width: u16) -> u16 {
@@ -102,6 +137,18 @@ fn count_wrapped_lines(text: &str, width: u16) -> u16 {
     lines.max(1)
 }
 
+fn format_sidebar_item(title: &str, width: usize) -> String {
+    // refactor: this can be done better
+    // suggestion: split by words instead of characters
+    title
+        .chars()
+        .collect::<Vec<char>>()
+        .chunks(width)
+        .map(|chunk| chunk.iter().collect::<String>())
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
 fn testing_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
     frame.render_widget(
         Paragraph::new(word)
@@ -111,10 +158,10 @@ fn testing_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
     );
 }
 
-fn render(frame: &mut Frame, tab: &Tab, news_app: &mut News, rt: &Runtime) {
+fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
     let base_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Percentage(20), Constraint::Percentage(80)])
+        .constraints(vec![Constraint::Percentage(10), Constraint::Percentage(90)])
         .split(frame.area());
     let bottom_layout = Layout::default()
         .direction(Direction::Horizontal)
@@ -128,7 +175,19 @@ fn render(frame: &mut Frame, tab: &Tab, news_app: &mut News, rt: &Runtime) {
     .flex(Flex::Center)
     .spacing(2)
     .split(base_layout[0]);
+    let sidebar_layout =
+        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout[0]);
     testing_block(frame, "", false, base_layout[0]);
+    testing_block(
+        frame,
+        match app.mode {
+            Mode::Normal => "Normal",
+            Mode::Insert => "Insert",
+            Mode::Visual => "Visual",
+        },
+        false,
+        base_layout[0],
+    );
     for (idx, i) in [Tab::News, Tab::Papers, Tab::Custom].iter().enumerate() {
         testing_block(
             frame,
@@ -137,22 +196,36 @@ fn render(frame: &mut Frame, tab: &Tab, news_app: &mut News, rt: &Runtime) {
                 Tab::Papers => "Papers",
                 Tab::Custom => "Custom",
             },
-            if tab == i { true } else { false },
+            if &app.tab == i { true } else { false },
             tab_layout[idx].centered_vertically(Constraint::Length(3)),
         );
     }
-    let list = List::new(
-        news_app
-            .items
-            .iter()
-            .map(|x| ListItem::from(x.title.clone())),
-    )
+    let list = List::new({
+        let mut items = Vec::<ListItem>::new();
+        for i in app.news_app.display_items.iter() {
+            let text = format_sidebar_item(
+                &app.news_app.items[*i].title,
+                sidebar_layout[1].width as usize - 3,
+            );
+            items.push(ListItem::from(text));
+            // TODO: add a block for each list item
+            // and make it contain pub date and categories
+            // this would be replaced by tui-widget-list
+        }
+        items
+    })
     .highlight_style(Style::default().bg(Color::Yellow))
-    .block(Block::default().borders(Borders::ALL));
-    frame.render_stateful_widget(list, bottom_layout[0], &mut news_app.state);
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 0, 0, 0)),
+    );
+    frame.render_widget(search_area, sidebar_layout[0]);
+    // fs::write("lol.txt", format!("{:#?}", list)).unwrap();
+    frame.render_stateful_widget(list, sidebar_layout[1], &mut app.news_app.state);
 
-    if let Some(i) = news_app.state.selected() {
-        match &news_app.items[i].content {
+    if let Some(i) = app.news_app.state.selected() {
+        match &app.news_app.items[app.news_app.display_items[i]].content {
             Some(content) => {
                 let viewport_height = bottom_layout[1].height;
                 let inner_width = bottom_layout[1].width.saturating_sub(1);
@@ -162,18 +235,18 @@ fn render(frame: &mut Frame, tab: &Tab, news_app: &mut News, rt: &Runtime) {
                     .sum::<u16>()
                     + (content.len().saturating_sub(1) as u16);
                 let max_scroll: u16;
-                match news_app.max_scroll_offsets.get(&i) {
+                match app.news_app.max_scroll_offsets.get(&i) {
                     Some(scroll_offset) => {
                         max_scroll = *scroll_offset;
                     }
                     None => {
                         // Max scroll: how many lines we can scroll before the last line hits bottom
                         max_scroll = total_lines.saturating_sub(viewport_height);
-                        news_app.max_scroll_offsets.insert(i, max_scroll);
+                        app.news_app.max_scroll_offsets.insert(i, max_scroll);
 
                         // Clamp scroll_offset in case content changed
-                        if news_app.scroll_offset > max_scroll {
-                            news_app.scroll_offset = max_scroll;
+                        if app.news_app.scroll_offset > max_scroll {
+                            app.news_app.scroll_offset = max_scroll;
                         }
                     }
                 }
@@ -181,21 +254,28 @@ fn render(frame: &mut Frame, tab: &Tab, news_app: &mut News, rt: &Runtime) {
                 frame.render_widget(
                     Paragraph::new(joined)
                         .wrap(Wrap { trim: true })
-                        .scroll((news_app.scroll_offset, 0)),
+                        .scroll((app.news_app.scroll_offset, 0))
+                        .block(Block::new().borders(Borders::ALL)),
                     bottom_layout[1],
                 );
 
                 if total_lines > viewport_height {
                     let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
-                        .position(news_app.scroll_offset as usize);
+                        .position(app.news_app.scroll_offset as usize);
                     let scrollbar =
                         Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight);
                     frame.render_stateful_widget(scrollbar, bottom_layout[1], &mut scrollbar_state);
                 }
             }
             None => {
-                news_app.items[i].content = Some(rt.block_on(fetch_content(&news_app.items[i])));
+                app.news_app.items[app.news_app.display_items[i]].content = Some(
+                    app.tokio_runtime.block_on(
+                        app.news_app
+                            .fetch_content(&app.news_app.items[app.news_app.display_items[i]]),
+                    ),
+                );
             }
         }
     }
 }
+// Store display_items as vec of index in items.
