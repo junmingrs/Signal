@@ -7,10 +7,8 @@ use ratatui::{
         event::{self, Event, KeyCode, KeyModifiers},
     },
     layout::{Constraint, Direction, Flex, Layout, Rect},
-    style::{Color, Style, Stylize},
-    widgets::{
-        Block, Borders, List, ListItem, Padding, Paragraph, Scrollbar, ScrollbarState, Wrap,
-    },
+    style::{Color, Stylize},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
 use ratatui_textarea::TextArea;
 
@@ -23,6 +21,7 @@ use crate::{
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     // setup app
     let mut app = App::new();
+    // setup news_app
     app.news_app.items = app
         .tokio_runtime
         .block_on(app.news_app.fetch_news(NewsCategory::Latest));
@@ -31,6 +30,12 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         items_index.push(i);
     }
     app.news_app.display_items = items_index;
+    app.news_app.sidebar.titles = app
+        .news_app
+        .items
+        .iter()
+        .map(|cna_model| cna_model.title.clone())
+        .collect();
     // setup search area
     let mut search_area = TextArea::default();
     search_area.set_block(Block::default().borders(Borders::ALL));
@@ -85,7 +90,7 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                         Some('3') => app.tab = Tab::Custom,
                         Some('4') => fs::write(
                             "output.txt",
-                            app.news_app.items[app.news_app.state.selected().clone().unwrap()]
+                            app.news_app.items[app.news_app.sidebar.state.selected.unwrap()]
                                 .content
                                 .clone()
                                 .unwrap()
@@ -135,18 +140,6 @@ fn count_wrapped_lines(text: &str, width: u16) -> u16 {
         }
     }
     lines.max(1)
-}
-
-fn format_sidebar_item(title: &str, width: usize) -> String {
-    // refactor: this can be done better
-    // suggestion: split by words instead of characters
-    title
-        .chars()
-        .collect::<Vec<char>>()
-        .chunks(width)
-        .map(|chunk| chunk.iter().collect::<String>())
-        .collect::<Vec<String>>()
-        .join("\n")
 }
 
 fn testing_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
@@ -200,31 +193,10 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
             tab_layout[idx].centered_vertically(Constraint::Length(3)),
         );
     }
-    let list = List::new({
-        let mut items = Vec::<ListItem>::new();
-        for i in app.news_app.display_items.iter() {
-            let text = format_sidebar_item(
-                &app.news_app.items[*i].title,
-                sidebar_layout[1].width as usize - 3,
-            );
-            items.push(ListItem::from(text));
-            // TODO: add a block for each list item
-            // and make it contain pub date and categories
-            // this would be replaced by tui-widget-list
-        }
-        items
-    })
-    .highlight_style(Style::default().bg(Color::Yellow))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .padding(Padding::new(1, 0, 0, 0)),
-    );
     frame.render_widget(search_area, sidebar_layout[0]);
-    // fs::write("lol.txt", format!("{:#?}", list)).unwrap();
-    frame.render_stateful_widget(list, sidebar_layout[1], &mut app.news_app.state);
+    frame.render_widget(&mut app.news_app.sidebar, sidebar_layout[1]);
 
-    if let Some(i) = app.news_app.state.selected() {
+    if let Some(i) = app.news_app.sidebar.state.selected {
         match &app.news_app.items[app.news_app.display_items[i]].content {
             Some(content) => {
                 let viewport_height = bottom_layout[1].height;
@@ -278,4 +250,3 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
         }
     }
 }
-// Store display_items as vec of index in items.
