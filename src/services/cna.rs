@@ -1,15 +1,10 @@
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-};
-
-use color_eyre::owo_colors::colors::css::Violet;
 use rss::Channel;
 use scraper::{Html, Selector};
 
 use crate::utils::cna_model::CNAModel;
 
-pub enum NewsCategory {
+#[derive(Clone, Copy)]
+pub enum NewsCategoryCNA {
     Latest,
     Asia,
     Business,
@@ -18,6 +13,19 @@ pub enum NewsCategory {
     World,
     Today,
 }
+
+impl NewsCategoryCNA {
+    pub const ALL: [NewsCategoryCNA; 7] = [
+        NewsCategoryCNA::Latest,
+        NewsCategoryCNA::Asia,
+        NewsCategoryCNA::Business,
+        NewsCategoryCNA::Singapore,
+        NewsCategoryCNA::Sports,
+        NewsCategoryCNA::World,
+        NewsCategoryCNA::Today,
+    ];
+}
+
 pub struct CNA;
 
 impl CNA {
@@ -35,15 +43,15 @@ impl CNA {
         "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6311";
     const TODAY_URL: &str =
         "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=679471";
-    pub async fn fetch_category(category: NewsCategory) -> String {
+    pub async fn fetch_category(category: NewsCategoryCNA) -> String {
         reqwest::get(match category {
-            NewsCategory::Latest => Self::LATEST_NEWS_URL,
-            NewsCategory::Asia => Self::ASIA_URL,
-            NewsCategory::Business => Self::BUSINESS_URL,
-            NewsCategory::Singapore => Self::SINGAPORE_URL,
-            NewsCategory::Sports => Self::SPORT_URL,
-            NewsCategory::World => Self::WORLD_URL,
-            NewsCategory::Today => Self::TODAY_URL,
+            NewsCategoryCNA::Latest => Self::LATEST_NEWS_URL,
+            NewsCategoryCNA::Asia => Self::ASIA_URL,
+            NewsCategoryCNA::Business => Self::BUSINESS_URL,
+            NewsCategoryCNA::Singapore => Self::SINGAPORE_URL,
+            NewsCategoryCNA::Sports => Self::SPORT_URL,
+            NewsCategoryCNA::World => Self::WORLD_URL,
+            NewsCategoryCNA::Today => Self::TODAY_URL,
         })
         .await
         .expect("Failed to fetch category")

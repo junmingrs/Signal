@@ -20,9 +20,10 @@ A terminal-based news reader built with **Rust** and **ratatui**
 
 ### 🟡 In Progress (News Section Improvements)
 
-* [ ] Switch between news categories (e.g. Latest, Sports, Business)
+* [x] Switch between news categories (e.g. Latest, Sports, Business)
 * [x] Display published date for each article
 * [x] Display article category
+* [ ] Store news in database
 
 ---
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    services::cna::{CNA, NewsCategory},
+    services::cna::{CNA, NewsCategoryCNA},
     utils::cna_model::CNAModel,
 };
 use ratatui::{
@@ -58,11 +58,46 @@ impl Widget for &mut Sidebar {
     }
 }
 
+pub struct NewsCategory {
+    source: String, // will be enum of specific news rss feeds in the future
+    categories: Vec<NewsCategoryCNA>, // || Vec<NewsCategorySR>
+    index: usize,
+}
+
+impl NewsCategory {
+    pub fn new() -> Self {
+        // pub fn new(category: NewsSource) for different sources
+        let mut categories: Vec<NewsCategoryCNA> = Vec::new();
+        for category in NewsCategoryCNA::ALL.iter() {
+            categories.push(*category);
+        }
+        Self {
+            source: "CNA".to_string(),
+            categories: categories,
+            index: 0,
+        }
+    }
+    pub fn next(&mut self) {
+        self.index = (self.index + 1) % self.categories.len();
+    }
+    pub fn previous(&mut self) {
+        if self.index == 0 {
+            self.index = self.categories.len() - 1;
+        } else {
+            self.index = (self.index - 1) % self.categories.len();
+        }
+    }
+    pub fn get_current(&self) -> NewsCategoryCNA {
+        // CNA only for now
+        self.categories[self.index]
+    }
+}
+
 pub struct News {
     pub items: Vec<CNAModel>,
     pub display_items: Vec<usize>, // list of item indices
     pub sidebar: Sidebar,
-    pub current_category: NewsCategory,
+    pub category: NewsCategory,
     pub scroll_offset: u16,
     pub max_scroll_offsets: HashMap<usize, u16>,
 }
@@ -78,12 +113,12 @@ impl News {
                 titles: Vec::new(),
                 state,
             },
-            current_category: NewsCategory::Latest,
+            category: NewsCategory::new(),
             scroll_offset: 0,
             max_scroll_offsets: HashMap::<usize, u16>::new(),
         }
     }
-    pub async fn fetch_news(&self, category: NewsCategory) -> Vec<CNAModel> {
+    pub async fn fetch_news(&self, category: NewsCategoryCNA) -> Vec<CNAModel> {
         let xml_response = CNA::fetch_category(category).await;
         CNA::parse(xml_response.clone())
     }
@@ -152,5 +187,12 @@ impl News {
     }
     pub fn scroll_up(&mut self) {
         self.scroll_offset = self.scroll_offset.saturating_sub(1);
+    }
+    pub fn reload_sidebar(&mut self) {
+        self.sidebar.titles = self
+            .items
+            .iter()
+            .map(|cna_model| cna_model.title.clone())
+            .collect();
     }
 }

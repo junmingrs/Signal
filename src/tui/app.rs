@@ -1,6 +1,6 @@
 use tokio::runtime::Runtime;
 
-use crate::{services::cna::NewsCategory, tui::tabs::news::News};
+use crate::tui::tabs::news::News;
 
 pub enum Focused {
     Left,

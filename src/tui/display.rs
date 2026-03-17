@@ -10,11 +10,10 @@ use ratatui::{
     style::{Color, Stylize},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
-use ratatui_textarea::TextArea;
-use tokio::runtime::Runtime;
+use ratatui_textarea::{Key, TextArea};
 
 use crate::{
-    services::cna::NewsCategory,
+    services::cna::NewsCategoryCNA,
     tui::{
         app::{App, Focused, Mode, Tab},
         tabs::news::News,
@@ -28,18 +27,13 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     // setup news_app
     app.news_app.items = app
         .tokio_runtime
-        .block_on(app.news_app.fetch_news(NewsCategory::Latest));
+        .block_on(app.news_app.fetch_news(app.news_app.category.get_current()));
     let mut items_index = Vec::new();
     for i in 0..app.news_app.items.len() {
         items_index.push(i);
     }
     app.news_app.display_items = items_index;
-    app.news_app.sidebar.titles = app
-        .news_app
-        .items
-        .iter()
-        .map(|cna_model| cna_model.title.clone())
-        .collect();
+    app.news_app.reload_sidebar();
     // setup search area
     let mut search_area = TextArea::default();
     search_area.set_block(Block::default().borders(Borders::ALL));
@@ -51,6 +45,33 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
             if let Event::Key(key) = event::read()? {
                 if key.code.is_esc() {
                     app.mode = Mode::Normal
+                }
+                // TODO: prettify this switch tab chunk
+                if key.code.is_back_tab() {
+                    fs::write("output.txt", "shift + tab").unwrap();
+                    match app.tab {
+                        Tab::News => {
+                            app.news_app.category.previous();
+                            app.news_app.items = app.tokio_runtime.block_on(
+                                app.news_app.fetch_news(app.news_app.category.get_current()),
+                            );
+                            app.news_app.reload_sidebar();
+                        }
+                        _ => {}
+                    }
+                } else {
+                    if key.code.is_tab() {
+                        match app.tab {
+                            Tab::News => {
+                                app.news_app.category.next();
+                                app.news_app.items = app.tokio_runtime.block_on(
+                                    app.news_app.fetch_news(app.news_app.category.get_current()),
+                                );
+                                app.news_app.reload_sidebar();
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 match app.mode {
                     Mode::Insert => {
@@ -86,7 +107,6 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                             app.news_app.reset_display_items();
                         }
                         app.news_app.update_state();
-                        // fs::write("output.txt", format!("{:#?}", results)).unwrap();
                     }
                     Mode::Normal => match key.code.as_char() {
                         Some('1') => app.tab = Tab::News,
@@ -226,9 +246,11 @@ fn render_news(
     frame: &mut Frame,
     news_app: &mut News,
     bottom_layout: Rect,
-    sidebar_list_area: Rect,
+    sidebar_list: Rect,
 ) -> bool {
-    frame.render_widget(&mut news_app.sidebar, sidebar_list_area);
+    let sidebar_category_list =
+        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(sidebar_list);
+    frame.render_widget(&mut news_app.sidebar, sidebar_category_list[1]);
 
     let bottom =
         Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout);
@@ -236,7 +258,29 @@ fn render_news(
         .flex(Flex::SpaceBetween)
         .split(bottom[0]);
 
+    testing_block(
+        frame,
+        {
+            match news_app.category.get_current() {
+                NewsCategoryCNA::Latest => "Category: Latest",
+                NewsCategoryCNA::Asia => "Category: Asia",
+                NewsCategoryCNA::Business => "Category: Business",
+                NewsCategoryCNA::Singapore => "Category: Singapore",
+                NewsCategoryCNA::Sports => "Category: Sports",
+                NewsCategoryCNA::World => "Category: World",
+                NewsCategoryCNA::Today => "Category: Today",
+            }
+        },
+        false,
+        sidebar_category_list[0],
+    );
+
     if let Some(i) = news_app.sidebar.state.selected {
+        // prevents index out of bounds when len() = 0
+        // len() = 0 when no articles found
+        if news_app.items.len() <= i {
+            return false;
+        }
         match &news_app.items[news_app.display_items[i]].content {
             Some(content) => {
                 testing_block(
@@ -245,10 +289,6 @@ fn render_news(
                     false,
                     bottom_top[0],
                 );
-                // fs::write(
-                //     "output.txt",
-                //     &news_app.items[news_app.display_items[i]].categories.join("/"),
-                // );
                 testing_block(
                     frame,
                     &news_app.items[news_app.display_items[i]]
