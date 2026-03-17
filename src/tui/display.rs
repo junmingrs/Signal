@@ -11,10 +11,14 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
 use ratatui_textarea::TextArea;
+use tokio::runtime::Runtime;
 
 use crate::{
     services::cna::NewsCategory,
-    tui::app::{App, Focused, Mode, Tab},
+    tui::{
+        app::{App, Focused, Mode, Tab},
+        tabs::news::News,
+    },
     utils::fuzzy::fuzzy_match,
 };
 
@@ -194,31 +198,86 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
         );
     }
     frame.render_widget(search_area, sidebar_layout[0]);
-    frame.render_widget(&mut app.news_app.sidebar, sidebar_layout[1]);
+    match app.tab {
+        Tab::News => {
+            let request_fetch_content = render_news(
+                frame,
+                &mut app.news_app,
+                bottom_layout[1],
+                sidebar_layout[1],
+            );
+            if request_fetch_content {
+                if let Some(i) = app.news_app.sidebar.state.selected {
+                    app.news_app.items[app.news_app.display_items[i]].content = Some(
+                        app.tokio_runtime.block_on(
+                            app.news_app
+                                .fetch_content(&app.news_app.items[app.news_app.display_items[i]]),
+                        ),
+                    );
+                }
+            }
+        }
+        Tab::Papers => {}
+        Tab::Custom => {}
+    }
+}
 
-    if let Some(i) = app.news_app.sidebar.state.selected {
-        match &app.news_app.items[app.news_app.display_items[i]].content {
+fn render_news(
+    frame: &mut Frame,
+    news_app: &mut News,
+    bottom_layout: Rect,
+    sidebar_list_area: Rect,
+) -> bool {
+    frame.render_widget(&mut news_app.sidebar, sidebar_list_area);
+
+    let bottom =
+        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout);
+    let bottom_top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .flex(Flex::SpaceBetween)
+        .split(bottom[0]);
+
+    if let Some(i) = news_app.sidebar.state.selected {
+        match &news_app.items[news_app.display_items[i]].content {
             Some(content) => {
-                let viewport_height = bottom_layout[1].height;
-                let inner_width = bottom_layout[1].width.saturating_sub(1);
+                testing_block(
+                    frame,
+                    &news_app.items[news_app.display_items[i]].pub_date,
+                    false,
+                    bottom_top[0],
+                );
+                // fs::write(
+                //     "output.txt",
+                //     &news_app.items[news_app.display_items[i]].categories.join("/"),
+                // );
+                testing_block(
+                    frame,
+                    &news_app.items[news_app.display_items[i]]
+                        .categories
+                        .join(", "),
+                    false,
+                    bottom_top[1],
+                );
+
+                let viewport_height = bottom[1].height;
+                let inner_width = bottom[1].width.saturating_sub(1);
                 let total_lines: u16 = content
                     .iter()
                     .map(|c| count_wrapped_lines(c, inner_width))
                     .sum::<u16>()
                     + (content.len().saturating_sub(1) as u16);
                 let max_scroll: u16;
-                match app.news_app.max_scroll_offsets.get(&i) {
+                match news_app.max_scroll_offsets.get(&i) {
                     Some(scroll_offset) => {
                         max_scroll = *scroll_offset;
                     }
                     None => {
                         // Max scroll: how many lines we can scroll before the last line hits bottom
                         max_scroll = total_lines.saturating_sub(viewport_height);
-                        app.news_app.max_scroll_offsets.insert(i, max_scroll);
+                        news_app.max_scroll_offsets.insert(i, max_scroll);
 
                         // Clamp scroll_offset in case content changed
-                        if app.news_app.scroll_offset > max_scroll {
-                            app.news_app.scroll_offset = max_scroll;
+                        if news_app.scroll_offset > max_scroll {
+                            news_app.scroll_offset = max_scroll;
                         }
                     }
                 }
@@ -226,27 +285,22 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
                 frame.render_widget(
                     Paragraph::new(joined)
                         .wrap(Wrap { trim: true })
-                        .scroll((app.news_app.scroll_offset, 0))
+                        .scroll((news_app.scroll_offset, 0))
                         .block(Block::new().borders(Borders::ALL)),
-                    bottom_layout[1],
+                    bottom[1],
                 );
 
                 if total_lines > viewport_height {
                     let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
-                        .position(app.news_app.scroll_offset as usize);
+                        .position(news_app.scroll_offset as usize);
                     let scrollbar =
                         Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight);
-                    frame.render_stateful_widget(scrollbar, bottom_layout[1], &mut scrollbar_state);
+                    frame.render_stateful_widget(scrollbar, bottom[1], &mut scrollbar_state);
                 }
+                return false;
             }
-            None => {
-                app.news_app.items[app.news_app.display_items[i]].content = Some(
-                    app.tokio_runtime.block_on(
-                        app.news_app
-                            .fetch_content(&app.news_app.items[app.news_app.display_items[i]]),
-                    ),
-                );
-            }
+            None => return true,
         }
     }
+    false
 }

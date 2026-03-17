@@ -28,7 +28,6 @@ impl ListItem {
 
 impl Widget for ListItem {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Block::from(self.text).style(self.style).render(area, buf);
         Paragraph::new(self.text)
             .style(self.style)
             .wrap(Wrap { trim: true })
@@ -63,6 +62,7 @@ pub struct News {
     pub items: Vec<CNAModel>,
     pub display_items: Vec<usize>, // list of item indices
     pub sidebar: Sidebar,
+    pub current_category: NewsCategory,
     pub scroll_offset: u16,
     pub max_scroll_offsets: HashMap<usize, u16>,
 }
@@ -78,6 +78,7 @@ impl News {
                 titles: Vec::new(),
                 state,
             },
+            current_category: NewsCategory::Latest,
             scroll_offset: 0,
             max_scroll_offsets: HashMap::<usize, u16>::new(),
         }
@@ -86,7 +87,6 @@ impl News {
         let xml_response = CNA::fetch_category(category).await;
         CNA::parse(xml_response.clone())
     }
-
     pub async fn fetch_content(&self, cna_model: &CNAModel) -> Vec<String> {
         let xml_response = CNA::fetch_page(&cna_model.link).await;
         let document = CNA::webscrape(&xml_response);
@@ -114,7 +114,7 @@ impl News {
         }
     }
     pub fn next(&mut self) {
-        let i = match self.sidebar.state.selected() {
+        let i = match self.sidebar.state.selected {
             Some(i) => {
                 if i >= self.display_items.len() - 1 {
                     0

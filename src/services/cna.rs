@@ -1,3 +1,9 @@
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+};
+
+use color_eyre::owo_colors::colors::css::Violet;
 use rss::Channel;
 use scraper::{Html, Selector};
 
@@ -71,7 +77,10 @@ impl CNA {
                     content: None,
                     link,
                     pub_date,
-                    categories: categories.iter().map(|c| c.name.clone()).collect(),
+                    categories: categories
+                        .iter()
+                        .map(|c| c.name.split(" ,").collect::<Vec<_>>().join(", "))
+                        .collect(),
                 }
             })
             .collect()
