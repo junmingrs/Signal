@@ -10,7 +10,7 @@ use ratatui::{
     style::{Color, Stylize},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
-use ratatui_textarea::{Key, TextArea};
+use ratatui_textarea::TextArea;
 
 use crate::{
     services::cna::NewsCategoryCNA,
@@ -20,6 +20,18 @@ use crate::{
     },
     utils::fuzzy::fuzzy_match,
 };
+
+fn update_news_category(app: &mut App, next: bool) {
+    if next {
+        app.news_app.category.next();
+    } else {
+        app.news_app.category.previous();
+    }
+    app.news_app.items = app
+        .tokio_runtime
+        .block_on(app.news_app.fetch_news(app.news_app.category.get_current()));
+    app.news_app.reload_sidebar();
+}
 
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     // setup app
@@ -45,33 +57,6 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
             if let Event::Key(key) = event::read()? {
                 if key.code.is_esc() {
                     app.mode = Mode::Normal
-                }
-                // TODO: prettify this switch tab chunk
-                if key.code.is_back_tab() {
-                    fs::write("output.txt", "shift + tab").unwrap();
-                    match app.tab {
-                        Tab::News => {
-                            app.news_app.category.previous();
-                            app.news_app.items = app.tokio_runtime.block_on(
-                                app.news_app.fetch_news(app.news_app.category.get_current()),
-                            );
-                            app.news_app.reload_sidebar();
-                        }
-                        _ => {}
-                    }
-                } else {
-                    if key.code.is_tab() {
-                        match app.tab {
-                            Tab::News => {
-                                app.news_app.category.next();
-                                app.news_app.items = app.tokio_runtime.block_on(
-                                    app.news_app.fetch_news(app.news_app.category.get_current()),
-                                );
-                                app.news_app.reload_sidebar();
-                            }
-                            _ => {}
-                        }
-                    }
                 }
                 match app.mode {
                     Mode::Insert => {
@@ -108,36 +93,49 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                         }
                         app.news_app.update_state();
                     }
-                    Mode::Normal => match key.code.as_char() {
-                        Some('1') => app.tab = Tab::News,
-                        Some('2') => app.tab = Tab::Papers,
-                        Some('3') => app.tab = Tab::Custom,
-                        Some('4') => fs::write(
-                            "output.txt",
-                            app.news_app.items[app.news_app.sidebar.state.selected.unwrap()]
-                                .content
-                                .clone()
-                                .unwrap()
-                                .iter()
-                                .map(|x| x.to_string())
-                                .collect::<String>(),
-                        )
-                        .unwrap(),
-                        Some('i') => app.mode = Mode::Insert,
-                        Some('v') => app.mode = Mode::Visual,
-                        Some('h') => app.focused = Focused::Left,
-                        Some('l') => app.focused = Focused::Right,
-                        Some('j') => match app.focused {
-                            Focused::Left => app.news_app.next(),
-                            Focused::Right => app.news_app.scroll_down(),
-                        },
-                        Some('k') => match app.focused {
-                            Focused::Left => app.news_app.previous(),
-                            Focused::Right => app.news_app.scroll_up(),
-                        },
-                        Some('q') => break Ok(()),
-                        _ => {}
-                    },
+                    Mode::Normal => {
+                        // use tab to cycle categories
+                        match key.code {
+                            KeyCode::Tab => match app.tab {
+                                Tab::News => update_news_category(&mut app, true),
+                                Tab::Papers => {}
+                                Tab::Custom => {}
+                            },
+                            KeyCode::BackTab => match app.tab {
+                                Tab::News => update_news_category(&mut app, false),
+                                Tab::Papers => {}
+                                Tab::Custom => {}
+                            },
+                            KeyCode::Char('1') => app.tab = Tab::News,
+                            KeyCode::Char('2') => app.tab = Tab::Papers,
+                            KeyCode::Char('3') => app.tab = Tab::Custom,
+                            KeyCode::Char('4') => fs::write(
+                                "output.txt",
+                                app.news_app.items[app.news_app.sidebar.state.selected.unwrap()]
+                                    .content
+                                    .clone()
+                                    .unwrap()
+                                    .iter()
+                                    .map(|x| x.to_string())
+                                    .collect::<String>(),
+                            )
+                            .unwrap(),
+                            KeyCode::Char('i') => app.mode = Mode::Insert,
+                            KeyCode::Char('v') => app.mode = Mode::Visual,
+                            KeyCode::Char('h') => app.focused = Focused::Left,
+                            KeyCode::Char('l') => app.focused = Focused::Right,
+                            KeyCode::Char('j') => match app.focused {
+                                Focused::Left => app.news_app.next(),
+                                Focused::Right => app.news_app.scroll_down(),
+                            },
+                            KeyCode::Char('k') => match app.focused {
+                                Focused::Left => app.news_app.previous(),
+                                Focused::Right => app.news_app.scroll_up(),
+                            },
+                            KeyCode::Char('q') => break Ok(()),
+                            _ => {}
+                        }
+                    }
                     Mode::Visual => {}
                 }
             }
