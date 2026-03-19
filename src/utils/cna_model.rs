@@ -1,5 +1,5 @@
 #[derive(Debug, Clone)]
-pub struct CNAModel {
+pub struct NewsModel {
     pub title: String,
     pub description: String,
     pub content: Option<Vec<String>>,

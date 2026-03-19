@@ -1,7 +1,7 @@
 use rss::Channel;
 use scraper::{Html, Selector};
 
-use crate::utils::cna_model::CNAModel;
+use crate::utils::cna_model::NewsModel;
 
 #[derive(Clone, Copy)]
 pub enum NewsCategoryCNA {
@@ -67,7 +67,7 @@ impl CNA {
             .await
             .expect("Failed to get body of data")
     }
-    pub fn parse(xml_response: String) -> Vec<CNAModel> {
+    pub fn parse(xml_response: String) -> Vec<NewsModel> {
         let channel = Channel::read_from(xml_response.as_bytes()).unwrap();
         channel
             .items
@@ -79,7 +79,7 @@ impl CNA {
                 let link = cloned_item.link.unwrap_or("".to_string());
                 let pub_date = cloned_item.pub_date.unwrap_or("".to_string());
                 let categories = cloned_item.categories;
-                CNAModel {
+                NewsModel {
                     title,
                     description,
                     content: None,

@@ -10,15 +10,13 @@ use ratatui::{
     style::{Color, Stylize},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{Key, TextArea};
 
 use crate::{
-    services::cna::NewsCategoryCNA,
-    tui::{
+    database::sqlite::db, services::cna::NewsCategoryCNA, tui::{
         app::{App, Focused, Mode, Tab},
         tabs::news::News,
-    },
-    utils::fuzzy::fuzzy_match,
+    }, utils::fuzzy::fuzzy_match
 };
 
 fn update_news_category(app: &mut App, next: bool) {
@@ -34,6 +32,8 @@ fn update_news_category(app: &mut App, next: bool) {
 }
 
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
+    // setup db
+    let db = db::new();
     // setup app
     let mut app = App::new();
     // setup news_app
@@ -120,6 +120,7 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                                     .collect::<String>(),
                             )
                             .unwrap(),
+                            KeyCode::Char('5') => db.save_news(app.news_app.items.clone()),
                             KeyCode::Char('i') => app.mode = Mode::Insert,
                             KeyCode::Char('v') => app.mode = Mode::Visual,
                             KeyCode::Char('h') => app.focused = Focused::Left,

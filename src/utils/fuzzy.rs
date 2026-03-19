@@ -1,6 +1,6 @@
-use crate::utils::cna_model::CNAModel;
+use crate::utils::cna_model::NewsModel;
 
-pub fn fuzzy_score(query: &String, cna_model: &CNAModel) -> i32 {
+pub fn fuzzy_score(query: &String, cna_model: &NewsModel) -> i32 {
     // should be u16
     let query = query.to_lowercase();
     let text = cna_model.title.to_lowercase();
@@ -21,8 +21,8 @@ pub fn fuzzy_score(query: &String, cna_model: &CNAModel) -> i32 {
     return score;
 }
 
-pub fn fuzzy_match(query: String, choices: Vec<CNAModel>) -> Vec<(i32, CNAModel, usize)> {
-    let mut results = Vec::<(i32, CNAModel, usize)>::new();
+pub fn fuzzy_match(query: String, choices: Vec<NewsModel>) -> Vec<(i32, NewsModel, usize)> {
+    let mut results = Vec::<(i32, NewsModel, usize)>::new();
     for (i, choice) in choices.iter().enumerate() {
         let s = fuzzy_score(&query, choice);
         if s > 0 {
