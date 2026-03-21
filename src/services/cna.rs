@@ -1,7 +1,7 @@
 use rss::Channel;
 use scraper::{Html, Selector};
 
-use crate::utils::cna_model::NewsModel;
+use crate::utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom};
 
 #[derive(Clone, Copy)]
 pub enum NewsCategoryCNA {
@@ -78,13 +78,14 @@ impl CNA {
                 let description = cloned_item.description.unwrap_or("".to_string());
                 let link = cloned_item.link.unwrap_or("".to_string());
                 let pub_date = cloned_item.pub_date.unwrap_or("".to_string());
+                let formatted_pub_date = rfc2822_to_custom(pub_date);
                 let categories = cloned_item.categories;
                 NewsModel {
                     title,
                     description,
                     content: None,
                     link,
-                    pub_date,
+                    pub_date: formatted_pub_date,
                     categories: categories
                         .iter()
                         .map(|c| c.name.split(" ,").collect::<Vec<_>>().join(", "))

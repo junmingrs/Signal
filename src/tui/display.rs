@@ -1,4 +1,7 @@
-use std::{fs, time::Duration};
+use std::{
+    fs::{self},
+    time::Duration,
+};
 
 use ratatui::{
     DefaultTerminal, Frame,
@@ -10,13 +13,16 @@ use ratatui::{
     style::{Color, Stylize},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
-use ratatui_textarea::{Key, TextArea};
+use ratatui_textarea::TextArea;
 
 use crate::{
-    database::sqlite::db, services::cna::NewsCategoryCNA, tui::{
+    database::sqlite::Db,
+    services::cna::NewsCategoryCNA,
+    tui::{
         app::{App, Focused, Mode, Tab},
         tabs::news::News,
-    }, utils::fuzzy::fuzzy_match
+    },
+    utils::fuzzy::fuzzy_match,
 };
 
 fn update_news_category(app: &mut App, next: bool) {
@@ -31,15 +37,25 @@ fn update_news_category(app: &mut App, next: bool) {
     app.news_app.reload_sidebar();
 }
 
+// TODO : work on async and background fetching/saving
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     // setup db
-    let db = db::new();
+    let db = Db::new();
     // setup app
     let mut app = App::new();
     // setup news_app
-    app.news_app.items = app
+    // fetch from db first
+    app.news_app.items = db.fetch_news(10);
+    // fetch from rss
+    let fetched_news = app
         .tokio_runtime
         .block_on(app.news_app.fetch_news(app.news_app.category.get_current()));
+    // remove duplicate news
+    for news in fetched_news.iter() {
+        if !db.check_news_exist(news) {
+            app.news_app.items.push(news.clone());
+        }
+    }
     let mut items_index = Vec::new();
     for i in 0..app.news_app.items.len() {
         items_index.push(i);

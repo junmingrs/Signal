@@ -1,4 +1,4 @@
-use crate::utils::cna_model::NewsModel;
+use crate::utils::news_model::NewsModel;
 
 pub fn fuzzy_score(query: &String, cna_model: &NewsModel) -> i32 {
     // should be u16

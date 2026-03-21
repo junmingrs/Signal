@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     services::cna::{CNA, NewsCategoryCNA},
-    utils::cna_model::NewsModel,
+    utils::news_model::NewsModel,
 };
 use ratatui::{
     buffer::Buffer,
