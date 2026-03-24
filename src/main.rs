@@ -3,7 +3,8 @@ mod services;
 mod utils;
 mod database;
 
-fn main() -> color_eyre::Result<()> {
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     ratatui::run(tui::display::app)?;
     Ok(())

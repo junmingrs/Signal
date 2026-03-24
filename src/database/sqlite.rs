@@ -1,16 +1,18 @@
 use ::sqlite::Connection;
+use sqlite::Row;
 
-use crate::utils::{
-    news_model::NewsModel,
-    time_formatter::{self, custom_time_to_unix},
+use crate::{
+    tui::tabs::news::{NewsCategory, NewsCategoryKind},
+    utils::{
+        news_model::NewsModel,
+        time_formatter::{self, custom_time_to_unix},
+    },
 };
 
 pub struct Db {
     connection: Connection,
 }
 
-// TODO: bugs to fix:
-// move on to async fetching and saving
 impl Db {
     pub fn new() -> Self {
         let connection = sqlite::open("db.sqlite").expect("unable to create db");
@@ -80,13 +82,8 @@ impl Db {
         }
     }
     pub fn fetch_news(&self, limit: i64) -> Vec<NewsModel> {
-        // TODO: right here
-        // cached news should be loaded into tui first
-        // prefetch next article in background
-        // add bookmark feature to not auto delete after 30 days
         let mut news: Vec<NewsModel> = Vec::new();
         let fetch_news_query = "SELECT * FROM news LIMIT ?";
-        let fetch_categories_query = "SELECT * FROM news_category WHERE news_id = ?";
         for news_row in self
             .connection
             .prepare(fetch_news_query)
@@ -96,41 +93,27 @@ impl Db {
             .unwrap()
             .map(|row| row.unwrap())
         {
-            let id = news_row.read::<i64, _>("id");
-            let title = news_row.read::<&str, _>("title").to_string();
-            let description = news_row.read::<&str, _>("description").to_string();
-            let fetched_content = news_row.read::<&str, _>("content").to_string();
-            let content = Some(
-                fetched_content
-                    .split("\n")
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>(),
-            );
-            let link = news_row.read::<&str, _>("link").to_string();
-            let pub_date = news_row.read::<i64, _>("pub_date");
-            let mut categories: Vec<String> = Vec::new();
-            for category_row in self
-                .connection
-                .prepare(fetch_categories_query)
-                .unwrap()
-                .into_iter()
-                .bind((1, id))
-                .unwrap()
-                .map(|r| r.unwrap())
-            {
-                categories.push(category_row.read::<&str, _>("category_name").to_string());
-            }
-            let formatted_pub_date = time_formatter::unix_to_custom_time(pub_date);
-            news.push(NewsModel {
-                title,
-                description,
-                content,
-                link,
-                pub_date: formatted_pub_date,
-                categories,
-            });
+            news.push(self.parse_news_model(news_row));
         }
         news
+    }
+    pub fn fetch_news_by_category(&self, category_kind: &NewsCategoryKind) -> Vec<NewsModel> {
+        let mut news_models: Vec<NewsModel> = Vec::new();
+        let select_query = "SELECT n.* FROM news n
+            JOIN news_category nc ON n.id = nc.news_id
+            WHERE nc.category_name = LIKE '%' || ? || '%' LIMIT 10;";
+        for row in self
+            .connection
+            .prepare(select_query)
+            .unwrap()
+            .into_iter()
+            .bind((1, category_kind.to_string().as_str()))
+            .unwrap()
+            .map(|x| x.unwrap())
+        {
+            news_models.push(self.parse_news_model(row));
+        }
+        news_models
     }
     // pub fn fetch_news_without_content(&self) -> Vec<NewsModel> {
     //     let mut news_without_content: Vec<NewsModel> = Vec::new();
@@ -182,6 +165,42 @@ impl Db {
         match statement.next().unwrap() {
             sqlite::State::Row => true,
             sqlite::State::Done => false,
+        }
+    }
+    fn parse_news_model(&self, row: Row) -> NewsModel {
+        let fetch_categories_query = "SELECT * FROM news_category WHERE news_id = ?";
+        let id = row.read::<i64, _>("id");
+        let title = row.read::<&str, _>("title").to_string();
+        let description = row.read::<&str, _>("description").to_string();
+        let fetched_content = row.read::<&str, _>("content").to_string();
+        let content = Some(
+            fetched_content
+                .split("\n")
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>(),
+        );
+        let link = row.read::<&str, _>("link").to_string();
+        let pub_date = row.read::<i64, _>("pub_date");
+        let mut categories: Vec<String> = Vec::new();
+        for category_row in self
+            .connection
+            .prepare(fetch_categories_query)
+            .unwrap()
+            .into_iter()
+            .bind((1, id))
+            .unwrap()
+            .map(|r| r.unwrap())
+        {
+            categories.push(category_row.read::<&str, _>("category_name").to_string());
+        }
+        let formatted_pub_date = time_formatter::unix_to_custom_time(pub_date);
+        NewsModel {
+            title,
+            description,
+            content,
+            link,
+            pub_date: formatted_pub_date,
+            categories,
         }
     }
 }

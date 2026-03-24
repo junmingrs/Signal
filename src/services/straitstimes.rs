@@ -5,8 +5,10 @@ use scraper::{Html, Selector};
 
 use crate::utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom};
 
+// TODO: make this for Straitstimes.
+// right now its only a copy of CNA
 #[derive(Clone, Copy)]
-pub enum NewsCategoryCNA {
+pub enum NewsCategorySR {
     Latest,
     Asia,
     Business,
@@ -16,28 +18,28 @@ pub enum NewsCategoryCNA {
     Today,
 }
 
-impl NewsCategoryCNA {
-    pub const ALL: [NewsCategoryCNA; 7] = [
-        NewsCategoryCNA::Latest,
-        NewsCategoryCNA::Asia,
-        NewsCategoryCNA::Business,
-        NewsCategoryCNA::Singapore,
-        NewsCategoryCNA::Sports,
-        NewsCategoryCNA::World,
-        NewsCategoryCNA::Today,
+impl NewsCategorySR {
+    pub const ALL: [NewsCategorySR; 7] = [
+        NewsCategorySR::Latest,
+        NewsCategorySR::Asia,
+        NewsCategorySR::Business,
+        NewsCategorySR::Singapore,
+        NewsCategorySR::Sports,
+        NewsCategorySR::World,
+        NewsCategorySR::Today,
     ];
 }
 
-impl fmt::Display for NewsCategoryCNA {
+impl fmt::Display for NewsCategorySR {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            NewsCategoryCNA::Latest => "Latest",
-            NewsCategoryCNA::Asia => "Asia",
-            NewsCategoryCNA::Business => "Business",
-            NewsCategoryCNA::Singapore => "Singapore",
-            NewsCategoryCNA::Sports => "Sports",
-            NewsCategoryCNA::World => "World",
-            NewsCategoryCNA::Today => "Today",
+            NewsCategorySR::Latest => "Latest",
+            NewsCategorySR::Asia => "Asia",
+            NewsCategorySR::Business => "Business",
+            NewsCategorySR::Singapore => "Singapore",
+            NewsCategorySR::Sports => "Sports",
+            NewsCategorySR::World => "World",
+            NewsCategorySR::Today => "Today",
         };
         write!(f, "{}", s)
     }
@@ -60,15 +62,15 @@ impl CNA {
         "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6311";
     const TODAY_URL: &str =
         "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=679471";
-    pub async fn fetch_category(category: &NewsCategoryCNA) -> String {
+    pub async fn fetch_category(category: NewsCategorySR) -> String {
         reqwest::get(match category {
-            NewsCategoryCNA::Latest => Self::LATEST_NEWS_URL,
-            NewsCategoryCNA::Asia => Self::ASIA_URL,
-            NewsCategoryCNA::Business => Self::BUSINESS_URL,
-            NewsCategoryCNA::Singapore => Self::SINGAPORE_URL,
-            NewsCategoryCNA::Sports => Self::SPORT_URL,
-            NewsCategoryCNA::World => Self::WORLD_URL,
-            NewsCategoryCNA::Today => Self::TODAY_URL,
+            NewsCategorySR::Latest => Self::LATEST_NEWS_URL,
+            NewsCategorySR::Asia => Self::ASIA_URL,
+            NewsCategorySR::Business => Self::BUSINESS_URL,
+            NewsCategorySR::Singapore => Self::SINGAPORE_URL,
+            NewsCategorySR::Sports => Self::SPORT_URL,
+            NewsCategorySR::World => Self::WORLD_URL,
+            NewsCategorySR::Today => Self::TODAY_URL,
         })
         .await
         .expect("Failed to fetch category")

@@ -1,6 +1,6 @@
-use tokio::runtime::Runtime;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::tui::tabs::news::News;
+use crate::tui::{display::Message, tabs::news::News};
 
 pub enum Focused {
     Left,
@@ -27,19 +27,20 @@ pub struct App {
     pub news_app: News,
     // pub papers_app: Papers,
     // pub custom_app: Custom,
-    pub tokio_runtime: Runtime,
+    pub tx: Sender<Message>,
+    pub rx: Receiver<Message>,
 }
 
 impl App {
     pub fn new() -> Self {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        // let items = rt.block_on(News::fetch_news(NewsCategory::Latest));
+        let (tx, rx) = mpsc::channel(32);
         Self {
             focused: Focused::Left,
             mode: Mode::Normal,
             tab: Tab::News,
             news_app: News::new(),
-            tokio_runtime: rt,
+            tx,
+            rx,
         }
     }
 }

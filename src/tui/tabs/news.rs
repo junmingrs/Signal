@@ -1,7 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use crate::{
-    services::cna::{CNA, NewsCategoryCNA},
+    database::sqlite::Db,
+    services::{
+        cna::{CNA, NewsCategoryCNA},
+        straitstimes::NewsCategorySR,
+    },
+    tui::display::Message,
     utils::news_model::NewsModel,
 };
 use ratatui::{
@@ -10,6 +15,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget, Wrap},
 };
+use tokio::sync::mpsc::Sender;
 use tui_widget_list::{ListBuilder, ListState, ListView};
 
 struct ListItem {
@@ -65,19 +71,35 @@ pub enum NewsSource {
     WallStreetJournal,
 }
 
+#[derive(Clone, Copy)]
+pub enum NewsCategoryKind {
+    CNA(NewsCategoryCNA),
+    SR(NewsCategorySR),
+}
+
+impl fmt::Display for NewsCategoryKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            NewsCategoryKind::CNA(_) => "CNA",
+            NewsCategoryKind::SR(_) => "SR",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 pub struct NewsCategory {
     source: NewsSource, // will be enum of specific news rss feeds in the future
-    categories: Vec<NewsCategoryCNA>, // || Vec<NewsCategorySR>
+    categories: Vec<NewsCategoryKind>, // || Vec<NewsCategorySR>
     index: usize,
 }
 
 impl NewsCategory {
     pub fn new(source: NewsSource) -> Self {
-        let mut categories = Vec::new();
+        let mut categories: Vec<NewsCategoryKind> = Vec::new();
         match source {
             NewsSource::CNA => {
                 for category in NewsCategoryCNA::ALL.iter() {
-                    categories.push(*category);
+                    categories.push(NewsCategoryKind::CNA(*category));
                 }
             }
             NewsSource::StraitsTimes => {}
@@ -100,8 +122,7 @@ impl NewsCategory {
             self.index = (self.index - 1) % self.categories.len();
         }
     }
-    pub fn get_current(&self) -> NewsCategoryCNA {
-        // CNA only for now
+    pub fn get_current(&self) -> NewsCategoryKind {
         self.categories[self.index]
     }
 }
@@ -131,14 +152,46 @@ impl News {
             max_scroll_offsets: HashMap::<usize, u16>::new(),
         }
     }
-    pub async fn fetch_news(&self, category: NewsCategoryCNA) -> Vec<NewsModel> {
-        let xml_response = CNA::fetch_category(category).await;
-        CNA::parse(xml_response.clone())
+    pub async fn fetch_articles_from_rss(category: &NewsCategoryKind) -> Vec<NewsModel> {
+        match category {
+            NewsCategoryKind::CNA(cna) => {
+                let xml_response = CNA::fetch_category(&cna).await;
+                CNA::parse(xml_response.clone())
+            }
+            NewsCategoryKind::SR(sr) => Vec::new(),
+        }
     }
-    pub async fn fetch_content(&self, cna_model: &NewsModel) -> Vec<String> {
-        let xml_response = CNA::fetch_page(&cna_model.link).await;
+    pub async fn fetch_article_content(news_model: &NewsModel, tx: Sender<Message>, idx: usize) {
+        let xml_response = CNA::fetch_page(&news_model.link).await;
         let document = CNA::webscrape(&xml_response);
-        CNA::get_content(document)
+        let content = CNA::get_content(document);
+        tokio::spawn(async move {
+            tx.send(Message::NewsContentFetched((content, idx)))
+                .await
+                .expect("Could not fetch content");
+        });
+    }
+    pub fn fetch_articles_by_category(&mut self, tx: Sender<Message>, db: &Db) {
+        let category_kind = self.category.get_current().clone();
+        self.items = db.fetch_news_by_category(&category_kind);
+        tokio::spawn(async move {
+            tx.send(Message::NewsFetched(
+                Self::fetch_articles_from_rss(&category_kind).await,
+            ))
+            .await
+            .unwrap();
+        });
+    }
+    pub fn fetch_articles(&mut self, tx: Sender<Message>, db: &Db) {
+        self.items = db.fetch_news(10);
+        let category_kind = self.category.get_current();
+        tokio::spawn(async move {
+            tx.send(Message::NewsFetched(
+                Self::fetch_articles_from_rss(&category_kind).await,
+            ))
+            .await
+            .unwrap();
+        });
     }
     pub fn reset_display_items(&mut self) {
         let mut items_index = Vec::new();
@@ -162,6 +215,9 @@ impl News {
         }
     }
     pub fn next(&mut self) {
+        if self.display_items.len() == 0 {
+            return;
+        }
         let i = match self.sidebar.state.selected {
             Some(i) => {
                 if i >= self.display_items.len() - 1 {
@@ -176,6 +232,9 @@ impl News {
         self.scroll_offset = 0;
     }
     pub fn previous(&mut self) {
+        if self.display_items.len() == 0 {
+            return;
+        }
         let i = match self.sidebar.state.selected {
             Some(i) => {
                 if i == 0 {
@@ -207,5 +266,14 @@ impl News {
             .iter()
             .map(|cna_model| cna_model.title.clone())
             .collect();
+    }
+    pub fn update_news_category(&mut self, next: bool, tx: Sender<Message>, db: &Db) {
+        if next {
+            self.category.next();
+        } else {
+            self.category.previous();
+        }
+        self.fetch_articles(tx, &db);
+        self.reload_sidebar();
     }
 }

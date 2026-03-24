@@ -1,5 +1,6 @@
 use std::{
-    fs::{self},
+    fs::{self, OpenOptions},
+    io::Write,
     time::Duration,
 };
 
@@ -14,61 +15,72 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
 use ratatui_textarea::TextArea;
+use tokio::sync::mpsc::Sender;
 
 use crate::{
     database::sqlite::Db,
-    services::cna::NewsCategoryCNA,
+    services::{cna::NewsCategoryCNA, straitstimes::NewsCategorySR},
     tui::{
         app::{App, Focused, Mode, Tab},
-        tabs::news::News,
+        tabs::news::{News, NewsCategoryKind},
     },
-    utils::fuzzy::fuzzy_match,
+    utils::{fuzzy::fuzzy_match, news_model::NewsModel},
 };
 
-fn update_news_category(app: &mut App, next: bool) {
-    if next {
-        app.news_app.category.next();
-    } else {
-        app.news_app.category.previous();
-    }
-    app.news_app.items = app
-        .tokio_runtime
-        .block_on(app.news_app.fetch_news(app.news_app.category.get_current()));
-    app.news_app.reload_sidebar();
+pub enum Message {
+    NewsFetched(Vec<NewsModel>),
+    NewsContentFetched((Vec<String>, usize)),
+    RequireNewsContent(usize),
+    Error(String),
 }
 
-// TODO : work on async and background fetching/saving
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     // setup db
     let db = Db::new();
     // setup app
     let mut app = App::new();
-    // setup news_app
-    // fetch from db first
-    app.news_app.items = db.fetch_news(10);
-    // fetch from rss
-    let fetched_news = app
-        .tokio_runtime
-        .block_on(app.news_app.fetch_news(app.news_app.category.get_current()));
-    // remove duplicate news
-    for news in fetched_news.iter() {
-        if !db.check_news_exist(news) {
-            app.news_app.items.push(news.clone());
-        }
-    }
-    let mut items_index = Vec::new();
-    for i in 0..app.news_app.items.len() {
-        items_index.push(i);
-    }
-    app.news_app.display_items = items_index;
-    app.news_app.reload_sidebar();
+    app.news_app.fetch_articles(app.tx.clone(), &db);
     // setup search area
     let mut search_area = TextArea::default();
     search_area.set_block(Block::default().borders(Borders::ALL));
     loop {
-        terminal.draw(|frame| {
-            render(frame, &mut app, &search_area);
-        })?;
+        // handle async messages
+        while let Ok(msg) = app.rx.try_recv() {
+            match msg {
+                Message::NewsFetched(items) => {
+                    // remove duplicate news
+                    for news in items.iter() {
+                        if !db.check_news_exist(news) {
+                            app.news_app.items.insert(0, news.clone());
+                        }
+                    }
+                    app.news_app.reset_display_items();
+                    app.news_app.reload_sidebar();
+                    // background content fetch
+                    for idx in 0..app.news_app.items.len() {
+                        let tx_background_fetch = app.tx.clone();
+                        tokio::spawn(async move {
+                            tx_background_fetch
+                                .send(Message::RequireNewsContent(idx))
+                                .await
+                                .expect("tx_background_fetch failed to send message");
+                        });
+                    }
+                }
+                Message::NewsContentFetched((content, idx)) => {
+                    app.news_app.items[app.news_app.display_items[idx]].content = Some(content);
+                }
+                Message::RequireNewsContent(idx) => {
+                    let news = app.news_app.items[app.news_app.display_items[idx]].clone();
+                    let tx_fetch_content = app.tx.clone();
+                    tokio::spawn(async move {
+                        News::fetch_article_content(&news, tx_fetch_content, idx).await;
+                    });
+                }
+                Message::Error(_) => {}
+            }
+        }
+        // handle input
         if crossterm::event::poll(Duration::from_millis(500))? {
             if let Event::Key(key) = event::read()? {
                 if key.code.is_esc() {
@@ -111,14 +123,19 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                     }
                     Mode::Normal => {
                         // use tab to cycle categories
+                        let tx_normal = app.tx.clone();
                         match key.code {
                             KeyCode::Tab => match app.tab {
-                                Tab::News => update_news_category(&mut app, true),
+                                Tab::News => {
+                                    app.news_app.update_news_category(true, tx_normal, &db)
+                                }
                                 Tab::Papers => {}
                                 Tab::Custom => {}
                             },
                             KeyCode::BackTab => match app.tab {
-                                Tab::News => update_news_category(&mut app, false),
+                                Tab::News => {
+                                    app.news_app.update_news_category(false, tx_normal, &db)
+                                }
                                 Tab::Papers => {}
                                 Tab::Custom => {}
                             },
@@ -157,6 +174,9 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                 }
             }
         }
+        terminal.draw(|frame| {
+            render(frame, &mut app, &search_area);
+        })?;
     }
 }
 
@@ -181,7 +201,7 @@ fn count_wrapped_lines(text: &str, width: u16) -> u16 {
     lines.max(1)
 }
 
-fn testing_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
+fn bordered_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
     frame.render_widget(
         Paragraph::new(word)
             .bg(if selected { Color::Green } else { Color::Reset })
@@ -190,6 +210,7 @@ fn testing_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
     );
 }
 
+// TODO: refactor for better naming and ui/ux
 fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
     let base_layout = Layout::default()
         .direction(Direction::Vertical)
@@ -209,8 +230,8 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
     .split(base_layout[0]);
     let sidebar_layout =
         Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout[0]);
-    testing_block(frame, "", false, base_layout[0]);
-    testing_block(
+    bordered_block(frame, "", false, base_layout[0]);
+    bordered_block(
         frame,
         match app.mode {
             Mode::Normal => "Normal",
@@ -221,7 +242,7 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
         base_layout[0],
     );
     for (idx, i) in [Tab::News, Tab::Papers, Tab::Custom].iter().enumerate() {
-        testing_block(
+        bordered_block(
             frame,
             match i {
                 Tab::News => "News",
@@ -235,22 +256,13 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
     frame.render_widget(search_area, sidebar_layout[0]);
     match app.tab {
         Tab::News => {
-            let request_fetch_content = render_news(
+            render_news(
                 frame,
                 &mut app.news_app,
                 bottom_layout[1],
                 sidebar_layout[1],
+                app.tx.clone(),
             );
-            if request_fetch_content {
-                if let Some(i) = app.news_app.sidebar.state.selected {
-                    app.news_app.items[app.news_app.display_items[i]].content = Some(
-                        app.tokio_runtime.block_on(
-                            app.news_app
-                                .fetch_content(&app.news_app.items[app.news_app.display_items[i]]),
-                        ),
-                    );
-                }
-            }
         }
         Tab::Papers => {}
         Tab::Custom => {}
@@ -262,7 +274,8 @@ fn render_news(
     news_app: &mut News,
     bottom_layout: Rect,
     sidebar_list: Rect,
-) -> bool {
+    tx: Sender<Message>,
+) {
     let sidebar_category_list =
         Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(sidebar_list);
     frame.render_widget(&mut news_app.sidebar, sidebar_category_list[1]);
@@ -273,17 +286,28 @@ fn render_news(
         .flex(Flex::SpaceBetween)
         .split(bottom[0]);
 
-    testing_block(
+    bordered_block(
         frame,
         {
             match news_app.category.get_current() {
-                NewsCategoryCNA::Latest => "Category: Latest",
-                NewsCategoryCNA::Asia => "Category: Asia",
-                NewsCategoryCNA::Business => "Category: Business",
-                NewsCategoryCNA::Singapore => "Category: Singapore",
-                NewsCategoryCNA::Sports => "Category: Sports",
-                NewsCategoryCNA::World => "Category: World",
-                NewsCategoryCNA::Today => "Category: Today",
+                NewsCategoryKind::CNA(cna) => match cna {
+                    NewsCategoryCNA::Latest => "Category: Latest",
+                    NewsCategoryCNA::Asia => "Category: Asia",
+                    NewsCategoryCNA::Business => "Category: Business",
+                    NewsCategoryCNA::Singapore => "Category: Singapore",
+                    NewsCategoryCNA::Sports => "Category: Sports",
+                    NewsCategoryCNA::World => "Category: World",
+                    NewsCategoryCNA::Today => "Category: Today",
+                },
+                NewsCategoryKind::SR(sr) => match sr {
+                    NewsCategorySR::Latest => "Category: Latest",
+                    NewsCategorySR::Asia => "Category: Asia",
+                    NewsCategorySR::Business => "Category: Business",
+                    NewsCategorySR::Singapore => "Category: Singapore",
+                    NewsCategorySR::Sports => "Category: Sports",
+                    NewsCategorySR::World => "Category: World",
+                    NewsCategorySR::Today => "Category: Today",
+                },
             }
         },
         false,
@@ -293,18 +317,18 @@ fn render_news(
     if let Some(i) = news_app.sidebar.state.selected {
         // prevents index out of bounds when len() = 0
         // len() = 0 when no articles found
-        if news_app.items.len() <= i {
-            return false;
+        if news_app.display_items.len() == 0 {
+            return;
         }
         match &news_app.items[news_app.display_items[i]].content {
             Some(content) => {
-                testing_block(
+                bordered_block(
                     frame,
                     &news_app.items[news_app.display_items[i]].pub_date,
                     false,
                     bottom_top[0],
                 );
-                testing_block(
+                bordered_block(
                     frame,
                     &news_app.items[news_app.display_items[i]]
                         .categories
@@ -352,10 +376,14 @@ fn render_news(
                         Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight);
                     frame.render_stateful_widget(scrollbar, bottom[1], &mut scrollbar_state);
                 }
-                return false;
             }
-            None => return true,
+            None => {
+                if let Some(i) = news_app.sidebar.state.selected {
+                    tokio::spawn(async move {
+                        tx.send(Message::RequireNewsContent(i)).await.unwrap();
+                    });
+                }
+            }
         }
     }
-    false
 }

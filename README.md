@@ -23,7 +23,7 @@ A terminal-based news reader built with **Rust** and **ratatui**
 * [x] Switch between news categories (e.g. Latest, Sports, Business)
 * [x] Display published date for each article
 * [x] Display article category
-* [ ] Store news in database
+* [x] Store news in database
 
 ---
 
@@ -49,7 +49,7 @@ A terminal-based news reader built with **Rust** and **ratatui**
 
 ### ⚙️ Architecture Improvements
 
-* [ ] Background fetching with async tasks (non-blocking UI)
+* [x] Background fetching with async tasks (non-blocking UI)
 * [ ] Better state management (separate UI vs data state)
 * [ ] Storing fetched data
 
