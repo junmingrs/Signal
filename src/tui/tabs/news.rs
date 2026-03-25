@@ -12,7 +12,7 @@ use crate::{
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Style, Stylize},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use tokio::sync::mpsc::Sender;
@@ -45,6 +45,7 @@ impl Widget for ListItem {
 pub struct Sidebar {
     pub titles: Vec<String>,
     pub state: ListState,
+    pub focused: bool,
 }
 
 impl Widget for &mut Sidebar {
@@ -52,13 +53,21 @@ impl Widget for &mut Sidebar {
         let builder = ListBuilder::new(|context| {
             let mut item = ListItem::new(self.titles[context.index].clone());
             if context.is_selected {
-                item.style = Style::default().bg(Color::Gray);
+                item.style = Style::default().fg(Color::Yellow);
             };
             let main_axis_size = 5; // what is this?
             (item, main_axis_size)
         });
         let item_count = self.titles.len();
-        let list = ListView::new(builder, item_count).block(Block::default().borders(Borders::ALL));
+        let list = ListView::new(builder, item_count).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(if self.focused {
+                    Color::Yellow
+                } else {
+                    Color::Reset
+                })),
+        );
         let state = &mut self.state;
         list.render(area, buf, state);
     }
@@ -146,6 +155,7 @@ impl News {
             sidebar: Sidebar {
                 titles: Vec::new(),
                 state,
+                focused: true,
             },
             category: NewsCategory::new(NewsSource::CNA),
             scroll_offset: 0,
@@ -200,20 +210,20 @@ impl News {
         }
         self.display_items = items_index; // maybe refactor to a oneliner
     }
-    pub fn update_state(&mut self) {
-        let mut done = false;
-        if let Some(curr_idx) = self.sidebar.state.selected {
-            for (idx, val) in self.display_items.iter().enumerate() {
-                if &curr_idx == val {
-                    done = true;
-                    self.sidebar.state.select(Some(idx));
-                }
-            }
-        }
-        if !done {
-            self.sidebar.state.select(None);
-        }
-    }
+    // pub fn update_state(&mut self) {
+    //     let mut done = false;
+    //     if let Some(curr_idx) = self.sidebar.state.selected {
+    //         for (idx, val) in self.display_items.iter().enumerate() {
+    //             if &curr_idx == val {
+    //                 done = true;
+    //                 self.sidebar.state.select(Some(idx));
+    //             }
+    //         }
+    //     }
+    //     if !done {
+    //         self.sidebar.state.select(None);
+    //     }
+    // }
     pub fn next(&mut self) {
         if self.display_items.len() == 0 {
             return;
@@ -261,11 +271,11 @@ impl News {
         self.scroll_offset = self.scroll_offset.saturating_sub(1);
     }
     pub fn reload_sidebar(&mut self) {
-        self.sidebar.titles = self
-            .items
-            .iter()
-            .map(|cna_model| cna_model.title.clone())
-            .collect();
+        let mut items: Vec<String> = Vec::new();  
+        for i in self.display_items.iter() {
+            items.push(self.items[*i].title.clone());
+        }
+        self.sidebar.titles = items;
     }
     pub fn update_news_category(&mut self, next: bool, tx: Sender<Message>, db: &Db) {
         if next {

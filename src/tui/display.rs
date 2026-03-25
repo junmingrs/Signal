@@ -1,6 +1,5 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self},
     time::Duration,
 };
 
@@ -11,7 +10,7 @@ use ratatui::{
         event::{self, Event, KeyCode, KeyModifiers},
     },
     layout::{Constraint, Direction, Flex, Layout, Rect},
-    style::{Color, Stylize},
+    style::{Color, Style, Stylize},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
 use ratatui_textarea::TextArea;
@@ -42,7 +41,6 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     app.news_app.fetch_articles(app.tx.clone(), &db);
     // setup search area
     let mut search_area = TextArea::default();
-    search_area.set_block(Block::default().borders(Borders::ALL));
     loop {
         // handle async messages
         while let Ok(msg) = app.rx.try_recv() {
@@ -68,7 +66,8 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                     }
                 }
                 Message::NewsContentFetched((content, idx)) => {
-                    app.news_app.items[app.news_app.display_items[idx]].content = Some(content);
+                    let item_idx = app.news_app.display_items[idx];
+                    app.news_app.items[item_idx].content = Some(content);
                 }
                 Message::RequireNewsContent(idx) => {
                     let news = app.news_app.items[app.news_app.display_items[idx]].clone();
@@ -119,7 +118,9 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                         if search_area.is_empty() {
                             app.news_app.reset_display_items();
                         }
-                        app.news_app.update_state();
+                        app.news_app.reload_sidebar();
+                        app.news_app.sidebar.state.selected = Some(0);
+                        // app.news_app.update_state();
                     }
                     Mode::Normal => {
                         // use tab to cycle categories
@@ -156,8 +157,14 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                             KeyCode::Char('5') => db.save_news(app.news_app.items.clone()),
                             KeyCode::Char('i') => app.mode = Mode::Insert,
                             KeyCode::Char('v') => app.mode = Mode::Visual,
-                            KeyCode::Char('h') => app.focused = Focused::Left,
-                            KeyCode::Char('l') => app.focused = Focused::Right,
+                            KeyCode::Char('h') => {
+                                app.focused = Focused::Left;
+                                app.news_app.sidebar.focused = true;
+                            }
+                            KeyCode::Char('l') => {
+                                app.focused = Focused::Right;
+                                app.news_app.sidebar.focused = false;
+                            }
                             KeyCode::Char('j') => match app.focused {
                                 Focused::Left => app.news_app.next(),
                                 Focused::Right => app.news_app.scroll_down(),
@@ -175,7 +182,7 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
             }
         }
         terminal.draw(|frame| {
-            render(frame, &mut app, &search_area);
+            render(frame, &mut app, &mut search_area);
         })?;
     }
 }
@@ -204,19 +211,22 @@ fn count_wrapped_lines(text: &str, width: u16) -> u16 {
 fn bordered_block(frame: &mut Frame, word: &str, selected: bool, layout: Rect) {
     frame.render_widget(
         Paragraph::new(word)
-            .bg(if selected { Color::Green } else { Color::Reset })
+            .fg(if selected {
+                Color::Yellow
+            } else {
+                Color::Reset
+            })
             .block(Block::new().borders(Borders::ALL)),
         layout,
     );
 }
 
-// TODO: refactor for better naming and ui/ux
-fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
+fn render(frame: &mut Frame, app: &mut App, search_area: &mut TextArea) {
     let base_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints(vec![Constraint::Percentage(10), Constraint::Percentage(90)])
         .split(frame.area());
-    let bottom_layout = Layout::default()
+    let body_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(base_layout[1]);
@@ -229,7 +239,7 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
     .spacing(2)
     .split(base_layout[0]);
     let sidebar_layout =
-        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout[0]);
+        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(body_layout[0]);
     bordered_block(frame, "", false, base_layout[0]);
     bordered_block(
         frame,
@@ -253,13 +263,22 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &TextArea) {
             tab_layout[idx].centered_vertically(Constraint::Length(3)),
         );
     }
-    frame.render_widget(search_area, sidebar_layout[0]);
+    search_area.set_block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(if let Mode::Insert = app.mode {
+                Color::Yellow
+            } else {
+                Color::Reset
+            })),
+    );
+    frame.render_widget(&*search_area, sidebar_layout[0]);
     match app.tab {
         Tab::News => {
             render_news(
                 frame,
                 &mut app.news_app,
-                bottom_layout[1],
+                body_layout[1],
                 sidebar_layout[1],
                 app.tx.clone(),
             );
@@ -365,7 +384,13 @@ fn render_news(
                     Paragraph::new(joined)
                         .wrap(Wrap { trim: true })
                         .scroll((news_app.scroll_offset, 0))
-                        .block(Block::new().borders(Borders::ALL)),
+                        .block(Block::new().borders(Borders::ALL).border_style(
+                            Style::default().fg(if !news_app.sidebar.focused {
+                                Color::Yellow
+                            } else {
+                                Color::Reset
+                            }),
+                        )),
                     bottom[1],
                 );
 
