@@ -1,3 +1,5 @@
+use crate::tui::tabs::news::NewsSource;
+
 #[derive(Debug, Clone)]
 pub struct NewsModel {
     pub title: String,
@@ -6,4 +8,5 @@ pub struct NewsModel {
     pub link: String,
     pub pub_date: String,
     pub categories: Vec<String>,
+    pub source: NewsSource,
 }

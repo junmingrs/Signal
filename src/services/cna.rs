@@ -1,11 +1,17 @@
-use std::fmt::{self};
+use std::{
+    clone,
+    fmt::{self},
+};
 
 use rss::Channel;
 use scraper::{Html, Selector};
 
-use crate::utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom};
+use crate::{
+    tui::tabs::news::NewsSource,
+    utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom},
+};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum NewsCategoryCNA {
     Latest,
     Asia,
@@ -107,6 +113,7 @@ impl CNA {
                         .iter()
                         .map(|c| c.name.split(" ,").collect::<Vec<_>>().join(", "))
                         .collect(),
+                    source: NewsSource::CNA,
                 }
             })
             .collect()
@@ -122,7 +129,6 @@ impl CNA {
         // }
     }
     pub fn webscrape(xml_response: &String) -> Html {
-        // gets content from link in CNAModel
         Html::parse_document(xml_response)
     }
     pub fn get_content(document: Html) -> Vec<String> {

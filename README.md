@@ -52,6 +52,7 @@ A terminal-based news reader built with **Rust** and **ratatui**
 * [x] Background fetching with async tasks (non-blocking UI)
 * [ ] Better state management (separate UI vs data state)
 * [ ] Storing fetched data
+* [ ] Async sqlite
 
 ---
 

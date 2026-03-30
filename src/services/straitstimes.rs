@@ -1,94 +1,133 @@
-use std::fmt::{self};
+use std::{
+    fmt::{self},
+    fs::{self, OpenOptions},
+    io::Write,
+};
 
+use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 use rss::Channel;
 use scraper::{Html, Selector};
 
-use crate::utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom};
+use crate::{
+    tui::tabs::news::NewsSource,
+    utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom},
+};
 
-// TODO: make this for Straitstimes.
-// right now its only a copy of CNA
-#[derive(Clone, Copy)]
-pub enum NewsCategorySR {
-    Latest,
-    Asia,
-    Business,
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum NewsCategoryST {
     Singapore,
-    Sports,
+    Asia,
     World,
-    Today,
+    Opinion,
+    Life,
+    Business,
+    Sport,
+    Newsletter,
 }
 
-impl NewsCategorySR {
-    pub const ALL: [NewsCategorySR; 7] = [
-        NewsCategorySR::Latest,
-        NewsCategorySR::Asia,
-        NewsCategorySR::Business,
-        NewsCategorySR::Singapore,
-        NewsCategorySR::Sports,
-        NewsCategorySR::World,
-        NewsCategorySR::Today,
+impl NewsCategoryST {
+    pub const ALL: [NewsCategoryST; 8] = [
+        NewsCategoryST::Singapore,
+        NewsCategoryST::Asia,
+        NewsCategoryST::World,
+        NewsCategoryST::Opinion,
+        NewsCategoryST::Life,
+        NewsCategoryST::Business,
+        NewsCategoryST::Sport,
+        NewsCategoryST::Newsletter,
     ];
 }
 
-impl fmt::Display for NewsCategorySR {
+impl fmt::Display for NewsCategoryST {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            NewsCategorySR::Latest => "Latest",
-            NewsCategorySR::Asia => "Asia",
-            NewsCategorySR::Business => "Business",
-            NewsCategorySR::Singapore => "Singapore",
-            NewsCategorySR::Sports => "Sports",
-            NewsCategorySR::World => "World",
-            NewsCategorySR::Today => "Today",
+            NewsCategoryST::Singapore => "Singapore",
+            NewsCategoryST::Asia => "Asia",
+            NewsCategoryST::World => "World",
+            NewsCategoryST::Opinion => "Opinion",
+            NewsCategoryST::Life => "Life",
+            NewsCategoryST::Business => "Business",
+            NewsCategoryST::Sport => "Sport",
+            NewsCategoryST::Newsletter => "Newsletter",
         };
         write!(f, "{}", s)
     }
 }
 
-pub struct CNA;
+pub struct ST;
 
-impl CNA {
-    const LATEST_NEWS_URL: &str =
-        "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml";
-    const ASIA_URL: &str =
-        "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6511";
-    const BUSINESS_URL: &str =
-        "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6936";
-    const SINGAPORE_URL: &str =
-        "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=10416";
-    const SPORT_URL: &str =
-        "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=10296";
-    const WORLD_URL: &str =
-        "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6311";
-    const TODAY_URL: &str =
-        "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=679471";
-    pub async fn fetch_category(category: NewsCategorySR) -> String {
-        reqwest::get(match category {
-            NewsCategorySR::Latest => Self::LATEST_NEWS_URL,
-            NewsCategorySR::Asia => Self::ASIA_URL,
-            NewsCategorySR::Business => Self::BUSINESS_URL,
-            NewsCategorySR::Singapore => Self::SINGAPORE_URL,
-            NewsCategorySR::Sports => Self::SPORT_URL,
-            NewsCategorySR::World => Self::WORLD_URL,
-            NewsCategorySR::Today => Self::TODAY_URL,
-        })
-        .await
-        .expect("Failed to fetch category")
-        .text()
-        .await
-        .expect("Failed to get body of data")
+impl ST {
+    const SINGAPORE_URL: &str = "https://www.straitstimes.com/news/singapore/rss.xml";
+    const ASIA_URL: &str = "https://www.straitstimes.com/news/asia/rss.xml";
+    const WORLD_URL: &str = "https://www.straitstimes.com/news/world/rss.xml";
+    const OPINION_URL: &str = "https://www.straitstimes.com/news/opinion/rss.xml";
+    const LIFE_URL: &str = "https://www.straitstimes.com/news/life/rss.xml";
+    const BUSINESS_URL: &str = "https://www.straitstimes.com/news/business/rss.xml";
+    const SPORT_URL: &str = "https://www.straitstimes.com/news/sport/rss.xml";
+    const NEWSLETTER_URL: &str = "https://www.straitstimes.com/news/newsletter/rss.xml";
+    pub async fn fetch_category(category: &NewsCategoryST) -> String {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+            ),
+        );
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/rss+xml, application/xml;q=0.9, */*;q=0.8"),
+        );
+
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+
+        let res = client
+            .get(match category {
+                NewsCategoryST::Singapore => Self::SINGAPORE_URL,
+                NewsCategoryST::Asia => Self::ASIA_URL,
+                NewsCategoryST::World => Self::WORLD_URL,
+                NewsCategoryST::Opinion => Self::OPINION_URL,
+                NewsCategoryST::Life => Self::LIFE_URL,
+                NewsCategoryST::Business => Self::BUSINESS_URL,
+                NewsCategoryST::Sport => Self::SPORT_URL,
+                NewsCategoryST::Newsletter => Self::NEWSLETTER_URL,
+            })
+            .send()
+            .await
+            .unwrap();
+
+        res.text().await.unwrap()
     }
     pub async fn fetch_page(url: &String) -> String {
-        reqwest::get(url)
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+            ),
+        );
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/rss+xml, application/xml;q=0.9, */*;q=0.8"),
+        );
+
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+        let res = client
+            .get(url)
+            .send()
             .await
-            .expect("Failed to fetch url")
-            .text()
-            .await
-            .expect("Failed to get body of data")
+            .expect("Failed to get body of data");
+        res.text().await.unwrap()
+        // fs::write("text.txt", t.clone()).unwrap();
     }
-    pub fn parse(xml_response: String) -> Vec<NewsModel> {
+    pub fn parse(xml_response: String, news_category: NewsCategoryST) -> Vec<NewsModel> {
         let channel = Channel::read_from(xml_response.as_bytes()).unwrap();
-        channel
+        let a: Vec<NewsModel> = channel
             .items
             .iter()
             .map(|item| {
@@ -98,37 +137,41 @@ impl CNA {
                 let link = cloned_item.link.unwrap_or("".to_string());
                 let pub_date = cloned_item.pub_date.unwrap_or("".to_string());
                 let formatted_pub_date = rfc2822_to_custom(pub_date);
-                let categories = cloned_item.categories;
                 NewsModel {
                     title,
                     description,
                     content: None,
                     link,
                     pub_date: formatted_pub_date,
-                    categories: categories
-                        .iter()
-                        .map(|c| c.name.split(" ,").collect::<Vec<_>>().join(", "))
-                        .collect(),
+                    categories: vec![news_category.to_string()],
+                    source: NewsSource::StraitsTimes,
                 }
             })
-            .collect()
+            .collect();
+        fs::write("t2.txt", format!("{:#?}", a)).unwrap();
+        a
+        // let mut file = OpenOptions::new()
+        //     .append(true)
+        //     .create(true)
+        //     .write(true)
+        //     .open("debug.txt")
+        //     .unwrap();
         // for (idx, cnamodel) in a.iter().enumerate() {
-        //     println!("iter: {}", idx);
-        //     println!("title: {}", cnamodel.title);
-        //     println!("description: {}", cnamodel.description);
-        //     println!("link: {}", cnamodel.link);
-        //     println!("pub_date: {}", cnamodel.pub_date);
+        //     writeln!(&mut file, "iter: {}", idx).unwrap();
+        //     writeln!(&mut file, "title: {}", cnamodel.title).unwrap();
+        //     writeln!(&mut file, "description: {}", cnamodel.description).unwrap();
+        //     writeln!(&mut file, "link: {}", cnamodel.link).unwrap();
+        //     writeln!(&mut file, "pub_date: {}", cnamodel.pub_date).unwrap();
         //     for category in cnamodel.categories.iter() {
-        //         println!("categories: {}", category);
+        //         writeln!(&mut file, "categories: {}", category).unwrap();
         //     }
         // }
     }
     pub fn webscrape(xml_response: &String) -> Html {
-        // gets content from link in CNAModel
         Html::parse_document(xml_response)
     }
     pub fn get_content(document: Html) -> Vec<String> {
-        let selector = Selector::parse(r#"section[data-title="Content"] div.text-long p"#).unwrap();
+        let selector = Selector::parse(r#"div.storyline-wrapper p"#).unwrap();
         document
             .select(&selector)
             .filter_map(|el| {
