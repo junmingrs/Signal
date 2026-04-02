@@ -33,7 +33,6 @@ pub enum Message {
     // fetch from db
     FetchedNewsArticles(Vec<NewsModel>),
     RequireNewsArticles(bool), // latest or not
-    Error(String),
 }
 
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
@@ -74,22 +73,21 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                 }
                 Message::FetchedNewsArticles(news_models) => {
                     if news_models.len() == 0 {
-                        continue;
+                        app.news_app.fetch_news_from_rss(app.tx.clone());
+                    } else {
+                        app.news_app.items = news_models;
+                        app.news_app.reset_display_items();
+                        app.news_app.reload_sidebar();
+                        app.news_app.sidebar.state.selected = Some(0);
                     }
-                    app.news_app.items = news_models;
-                    app.news_app.reset_display_items();
-                    app.news_app.reload_sidebar();
-                    app.news_app.sidebar.state.selected = Some(0);
                 }
                 Message::RequireNewsArticles(latest) => {
-                    fs::write("b.txt", latest.to_string()).unwrap();
                     if latest {
                         app.news_app.fetch_latest_news_from_db(app.tx.clone(), &db);
                     } else {
                         app.news_app.fetch_news_from_db(app.tx.clone(), &db);
                     }
                 }
-                Message::Error(_) => {}
             }
         }
         // handle input
@@ -191,13 +189,6 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                                 app.news_app
                                     .category
                                     .update_source(NewsSource::StraitsTimes);
-                                app.news_app.clear_items();
-                                // app.news_app.fetch_news_from_rss(tx_normal);
-                            }
-                            KeyCode::Char('w') => {
-                                app.news_app
-                                    .category
-                                    .update_source(NewsSource::WallStreetJournal);
                                 app.news_app.clear_items();
                                 // app.news_app.fetch_news_from_rss(tx_normal);
                             }
@@ -349,7 +340,6 @@ fn render_news(
     let sidebar_category_list =
         Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(sidebar_list);
     frame.render_widget(&mut news_app.sidebar, sidebar_category_list[1]);
-    fs::write("output.txt", news_app.sidebar.titles.join("\n").as_str()).unwrap();
 
     let bottom =
         Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout);
@@ -365,6 +355,7 @@ fn render_news(
         Paragraph::new(match news_app.category.get_current() {
             NewsCategoryKind::CNA(cna) => cna.to_string(),
             NewsCategoryKind::ST(st) => st.to_string(),
+            NewsCategoryKind::BT(bt) => bt.to_string(),
         })
         .block(Block::new().borders(Borders::ALL).title("Category")),
         category_and_source[0],
@@ -375,7 +366,6 @@ fn render_news(
             NewsSource::CNA => "CNA",
             NewsSource::StraitsTimes => "StraitsTimes",
             NewsSource::BusinessTimes => "BusinessTimes",
-            NewsSource::WallStreetJournal => "WallStreetJournal",
         })
         .block(Block::new().borders(Borders::ALL).title("Source")),
         category_and_source[1],

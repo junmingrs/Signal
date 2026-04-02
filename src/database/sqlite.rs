@@ -115,6 +115,7 @@ impl Db {
         let news_category = match category.get_current() {
             NewsCategoryKind::CNA(cna) => cna.to_string(),
             NewsCategoryKind::ST(st) => st.to_string(),
+            NewsCategoryKind::BT(bt) => bt.to_string(),
         };
         for row in self
             .connection
@@ -215,7 +216,6 @@ impl Db {
             "CNA" => NewsSource::CNA,
             "StraitsTimes" => NewsSource::StraitsTimes,
             "BusinessTimes" => NewsSource::BusinessTimes,
-            "WallStreetJournal" => NewsSource::WallStreetJournal,
             _ => panic!("News Source not found"), // this will be properly managed later
         };
         NewsModel {

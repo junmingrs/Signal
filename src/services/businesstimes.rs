@@ -1,6 +1,6 @@
 use std::{
     fmt::{self},
-    fs::{self, OpenOptions},
+    fs::OpenOptions,
     io::Write,
 };
 
@@ -14,58 +14,50 @@ use crate::{
 };
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum NewsCategoryST {
+pub enum NewsCategoryBT {
     Singapore,
-    Asia,
-    World,
+    International,
     Opinion,
-    Life,
-    Business,
-    Sport,
-    Newsletter,
+    Market,
+    Technology,
+    Awards,
 }
 
-impl NewsCategoryST {
-    pub const ALL: [NewsCategoryST; 8] = [
-        NewsCategoryST::Singapore,
-        NewsCategoryST::Asia,
-        NewsCategoryST::World,
-        NewsCategoryST::Opinion,
-        NewsCategoryST::Life,
-        NewsCategoryST::Business,
-        NewsCategoryST::Sport,
-        NewsCategoryST::Newsletter,
+impl NewsCategoryBT {
+    pub const ALL: [NewsCategoryBT; 6] = [
+        NewsCategoryBT::Singapore,
+        NewsCategoryBT::International,
+        NewsCategoryBT::Opinion,
+        NewsCategoryBT::Market,
+        NewsCategoryBT::Technology,
+        NewsCategoryBT::Awards,
     ];
 }
 
-impl fmt::Display for NewsCategoryST {
+impl fmt::Display for NewsCategoryBT {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            NewsCategoryST::Singapore => "Singapore",
-            NewsCategoryST::Asia => "Asia",
-            NewsCategoryST::World => "World",
-            NewsCategoryST::Opinion => "Opinion",
-            NewsCategoryST::Life => "Life",
-            NewsCategoryST::Business => "Business",
-            NewsCategoryST::Sport => "Sport",
-            NewsCategoryST::Newsletter => "Newsletter",
+            NewsCategoryBT::Singapore => "Singapore",
+            NewsCategoryBT::International => "International",
+            NewsCategoryBT::Opinion => "Opinion",
+            NewsCategoryBT::Market => "Market",
+            NewsCategoryBT::Technology => "Technology",
+            NewsCategoryBT::Awards => "Awards",
         };
         write!(f, "{}", s)
     }
 }
 
-pub struct ST;
+pub struct BT;
 
-impl ST {
-    const SINGAPORE_URL: &str = "https://www.straitstimes.com/news/singapore/rss.xml";
-    const ASIA_URL: &str = "https://www.straitstimes.com/news/asia/rss.xml";
-    const WORLD_URL: &str = "https://www.straitstimes.com/news/world/rss.xml";
-    const OPINION_URL: &str = "https://www.straitstimes.com/news/opinion/rss.xml";
-    const LIFE_URL: &str = "https://www.straitstimes.com/news/life/rss.xml";
-    const BUSINESS_URL: &str = "https://www.straitstimes.com/news/business/rss.xml";
-    const SPORT_URL: &str = "https://www.straitstimes.com/news/sport/rss.xml";
-    const NEWSLETTER_URL: &str = "https://www.straitstimes.com/news/newsletter/rss.xml";
-    pub async fn fetch_category(category: &NewsCategoryST) -> String {
+impl BT {
+    const SINGAPORE_URL: &str = "https://www.businesstimes.com.sg/rss/singapore";
+    const INTERNATIONAL_URL: &str = "https://www.businesstimes.com.sg/rss/international";
+    const OPINION_URL: &str = "https://www.businesstimes.com.sg/rss/opinion-features";
+    const MARKET_URL: &str = "https://www.businesstimes.com.sg/rss/companies-markets";
+    const TECHNOLOGY_URL: &str = "https://www.businesstimes.com.sg/rss/startups-tech";
+    const AWARDS_URL: &str = "https://www.businesstimes.com.sg/rss/events-awards";
+    pub async fn fetch_category(category: &NewsCategoryBT) -> String {
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -85,14 +77,12 @@ impl ST {
 
         let res = client
             .get(match category {
-                NewsCategoryST::Singapore => Self::SINGAPORE_URL,
-                NewsCategoryST::Asia => Self::ASIA_URL,
-                NewsCategoryST::World => Self::WORLD_URL,
-                NewsCategoryST::Opinion => Self::OPINION_URL,
-                NewsCategoryST::Life => Self::LIFE_URL,
-                NewsCategoryST::Business => Self::BUSINESS_URL,
-                NewsCategoryST::Sport => Self::SPORT_URL,
-                NewsCategoryST::Newsletter => Self::NEWSLETTER_URL,
+                NewsCategoryBT::Singapore => Self::SINGAPORE_URL,
+                NewsCategoryBT::International => Self::INTERNATIONAL_URL,
+                NewsCategoryBT::Opinion => Self::OPINION_URL,
+                NewsCategoryBT::Market => Self::MARKET_URL,
+                NewsCategoryBT::Technology => Self::TECHNOLOGY_URL,
+                NewsCategoryBT::Awards => Self::AWARDS_URL,
             })
             .send()
             .await
@@ -125,7 +115,7 @@ impl ST {
         res.text().await.unwrap()
         // fs::write("text.txt", t.clone()).unwrap();
     }
-    pub fn parse(xml_response: String, news_category: NewsCategoryST) -> Vec<NewsModel> {
+    pub fn parse(xml_response: String, news_category: NewsCategoryBT) -> Vec<NewsModel> {
         let channel = Channel::read_from(xml_response.as_bytes()).unwrap();
         channel
             .items
@@ -144,7 +134,7 @@ impl ST {
                     link,
                     pub_date: formatted_pub_date,
                     categories: vec![news_category.to_string()],
-                    source: NewsSource::StraitsTimes,
+                    source: NewsSource::BusinessTimes,
                 }
             })
             .collect()
@@ -169,7 +159,7 @@ impl ST {
         Html::parse_document(xml_response)
     }
     pub fn get_content(document: Html) -> Vec<String> {
-        let selector = Selector::parse(r#"div.storyline-wrapper p"#).unwrap();
+        let selector = Selector::parse(r#"div[data-testid="article-body-container"] p"#).unwrap();
         document
             .select(&selector)
             .filter_map(|el| {

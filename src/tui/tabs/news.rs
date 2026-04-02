@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt, fs};
 use crate::{
     database::sqlite::Db,
     services::{
+        businesstimes::{BT, NewsCategoryBT},
         cna::{CNA, NewsCategoryCNA},
         straitstimes::{NewsCategoryST, ST},
     },
@@ -78,7 +79,6 @@ pub enum NewsSource {
     CNA,
     StraitsTimes,
     BusinessTimes,
-    WallStreetJournal,
 }
 
 impl fmt::Display for NewsSource {
@@ -87,7 +87,6 @@ impl fmt::Display for NewsSource {
             NewsSource::CNA => "CNA",
             NewsSource::StraitsTimes => "StraitsTimes",
             NewsSource::BusinessTimes => "BusinessTimes",
-            NewsSource::WallStreetJournal => "WallStreetJournal",
         };
         write!(f, "{}", s)
     }
@@ -97,6 +96,7 @@ impl fmt::Display for NewsSource {
 pub enum NewsCategoryKind {
     CNA(NewsCategoryCNA),
     ST(NewsCategoryST),
+    BT(NewsCategoryBT),
 }
 
 impl fmt::Display for NewsCategoryKind {
@@ -104,6 +104,7 @@ impl fmt::Display for NewsCategoryKind {
         let s = match self {
             NewsCategoryKind::CNA(_) => "CNA",
             NewsCategoryKind::ST(_) => "ST",
+            NewsCategoryKind::BT(_) => "BT",
         };
         write!(f, "{}", s)
     }
@@ -140,8 +141,11 @@ impl NewsCategory {
                     categories.push(NewsCategoryKind::ST(*category));
                 }
             }
-            NewsSource::BusinessTimes => {}
-            NewsSource::WallStreetJournal => {}
+            NewsSource::BusinessTimes => {
+                for category in NewsCategoryBT::ALL.iter() {
+                    categories.push(NewsCategoryKind::BT(*category));
+                }
+            }
         }
         categories
     }
@@ -199,7 +203,7 @@ impl News {
         }
     }
     pub async fn fetch_titles_from_rss(category: &NewsCategoryKind) -> Vec<NewsModel> {
-        let a = match category {
+        match category {
             NewsCategoryKind::CNA(cna) => {
                 let xml_response = CNA::fetch_category(&cna).await;
                 CNA::parse(xml_response.clone())
@@ -208,16 +212,18 @@ impl News {
                 let xml_response = ST::fetch_category(&st).await;
                 ST::parse(xml_response.clone(), *st)
             }
-        };
-        fs::write("t3.txt", format!("{:#?}", a)).unwrap();
-        a
+            NewsCategoryKind::BT(bt) => {
+                let xml_response = BT::fetch_category(&bt).await;
+                BT::parse(xml_response.clone(), *bt)
+            }
+        }
     }
     pub async fn fetch_article_content(
         category: NewsCategory,
         news_model: &NewsModel,
         tx: Sender<Message>,
     ) {
-        let mut content = Vec::new();
+        let content;
         match category.source {
             NewsSource::CNA => {
                 let xml_response = CNA::fetch_page(&news_model.link).await;
@@ -229,8 +235,11 @@ impl News {
                 let document = ST::webscrape(&xml_response);
                 content = ST::get_content(document);
             }
-            NewsSource::BusinessTimes => {}
-            NewsSource::WallStreetJournal => {}
+            NewsSource::BusinessTimes => {
+                let xml_response = BT::fetch_page(&news_model.link).await;
+                let document = BT::webscrape(&xml_response);
+                content = BT::get_content(document);
+            }
         }
         let model = news_model.clone();
         tokio::spawn(async move {
