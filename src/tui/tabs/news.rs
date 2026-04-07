@@ -191,7 +191,7 @@ impl News {
         let category = self.category.clone();
         let news_models = db.fetch_news_by_source_and_category(&category);
         tokio::spawn(async move {
-            tx.send(Message::FetchedNewsArticles(news_models))
+            tx.send(Message::NewsArticlesFetched(news_models))
                 .await
                 .unwrap()
         });
@@ -200,7 +200,7 @@ impl News {
         let news_source = self.category.source.clone();
         let news_models = db.fetch_latest_news_by_source(news_source);
         tokio::spawn(async move {
-            tx.send(Message::FetchedNewsArticles(news_models))
+            tx.send(Message::NewsArticlesFetched(news_models))
                 .await
                 .unwrap()
         });
@@ -209,7 +209,7 @@ impl News {
         let category = self.category.clone();
         let category_kind = category.get_current();
         tokio::spawn(async move {
-            tx.send(Message::RSSFetched(
+            tx.send(Message::NewsRSSFetched(
                 Self::fetch_titles_from_rss(&category_kind).await,
             ))
             .await

@@ -2,9 +2,13 @@ use ::sqlite::Connection;
 use sqlite::Row;
 
 use crate::{
-    tui::tabs::news::{NewsCategory, NewsCategoryKind, NewsSource},
+    tui::tabs::{
+        news::{NewsCategory, NewsCategoryKind, NewsSource},
+        papers,
+    },
     utils::{
         news_model::NewsModel,
+        papers_model::PapersModel,
         time_formatter::{self, custom_time_to_unix},
     },
 };
@@ -24,7 +28,7 @@ impl Db {
                     description TEXT NOT NULL, 
                     content TEXT,
                     link TEXT UNIQUE NOT NULL,
-                    pub_date TEXT NOT NULL,
+                    pub_date INTEGER NOT NULL,
                     source TEXT NOT NULL
                 );",
             )
@@ -39,6 +43,17 @@ impl Db {
                 )",
             )
             .expect("create news category table failed");
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS papers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    link TEXT UNIQUE NOT NULL,
+                    pub_date INTEGER NOT NULL
+                )",
+            )
+            .expect("create papers table failed");
         Self { connection }
     }
     pub fn save_news_batch(&self, news: Vec<NewsModel>) {
@@ -132,49 +147,6 @@ impl Db {
         }
         news_models
     }
-    // pub fn fetch_news_without_content(&self) -> Vec<NewsModel> {
-    //     let mut news_without_content: Vec<NewsModel> = Vec::new();
-    //     let content_exist_query = "SELECT * FROM news WHERE content IS NULL";
-    //     let fetch_categories_query = "SELECT * FROM news_category WHERE news_id = ?";
-    //     for row in self
-    //         .connection
-    //         .prepare(content_exist_query)
-    //         .unwrap()
-    //         .into_iter()
-    //         .map(|row| row.unwrap())
-    //     {
-    //         let id = row.read::<i64, _>("id");
-    //         let title = row.read::<&str, _>("title").to_string();
-    //         let description = row.read::<&str, _>("description").to_string();
-    //         let link = row.read::<&str, _>("link").to_string();
-    //         let pub_date = row.read::<i64, _>("pub_date");
-    //         let formatted_date = unix_to_custom_time(pub_date);
-    //         let mut categories: Vec<String> = Vec::new();
-    //         for category_row in self
-    //             .connection
-    //             .prepare(fetch_categories_query)
-    //             .unwrap()
-    //             .into_iter()
-    //             .bind((1, id))
-    //             .unwrap()
-    //             .map(|r| r.unwrap())
-    //         {
-    //             categories.push(category_row.read::<&str, _>("category_name").to_string());
-    //         }
-    //         news_without_content.push(NewsModel {
-    //             title,
-    //             description,
-    //             content: None,
-    //             link,
-    //             pub_date: formatted_date,
-    //             categories,
-    //         });
-    //     }
-    //     news_without_content
-    // }
-    // pub fn bulk_update_news_content(&self, news_with_content: Vec<NewsModel>) {
-    //     let news_without_content = self.fetch_news_without_content();
-    // }
     pub fn check_news_exist(&self, news: &NewsModel) -> bool {
         let check_query = "SELECT 1 FROM news WHERE title = ?";
         let mut statement = self.connection.prepare(check_query).unwrap();
@@ -227,5 +199,54 @@ impl Db {
             categories,
             source,
         }
+    }
+    pub fn save_papers(&self, papers_model: PapersModel) {
+        let papers_query =
+            "INSERT OR IGNORE INTO papers (title, description, link, pub_date) VALUES (?, ?, ?, ?)";
+        let timestamp = custom_time_to_unix(&papers_model.pub_date);
+        let mut news_statement = self.connection.prepare(papers_query).unwrap();
+        news_statement
+            .bind((1, papers_model.title.as_str()))
+            .unwrap();
+        news_statement
+            .bind((2, papers_model.summary.as_str()))
+            .unwrap();
+        news_statement
+            .bind((3, papers_model.link.as_str()))
+            .unwrap();
+        news_statement.bind((4, timestamp)).unwrap();
+        news_statement.next().expect("could not save papers");
+    }
+    pub fn save_papers_batch(&self, papers_models: Vec<PapersModel>) {
+        for papers_model in papers_models {
+            self.save_papers(papers_model);
+        }
+    }
+    pub fn parse_papers_model(&self, row: Row) -> PapersModel {
+        let title = row.read::<&str, _>("title").to_string();
+        let description = row.read::<&str, _>("description").to_string();
+        let link = row.read::<&str, _>("link").to_string();
+        let pub_date = row.read::<i64, _>("pub_date");
+        let formatted_pub_date = time_formatter::unix_to_custom_time(pub_date);
+        PapersModel {
+            title,
+            summary: description,
+            link,
+            pub_date: formatted_pub_date,
+        }
+    }
+    pub fn fetch_papers(&self) -> Vec<PapersModel> {
+        let mut papers_models: Vec<PapersModel> = Vec::new();
+        let fetch_news_query = "SELECT * FROM papers LIMIT 10";
+        for row in self
+            .connection
+            .prepare(fetch_news_query)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.unwrap())
+        {
+            papers_models.push(self.parse_papers_model(row));
+        }
+        papers_models
     }
 }

@@ -13,26 +13,100 @@ use ratatui::{
     style::{Color, Style, Stylize},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{Key, TextArea};
 use tokio::sync::mpsc::Sender;
 
 use crate::{
     database::sqlite::Db,
     tui::{
         app::{App, Focused, Mode, Tab},
-        tabs::news::{News, NewsCategoryKind, NewsSource},
+        tabs::{
+            news::{News, NewsCategoryKind, NewsSource},
+            papers::Papers,
+        },
     },
-    utils::{fuzzy::fuzzy_match, helper::is_latest, news_model::NewsModel},
+    utils::{
+        fuzzy::fuzzy_match, helper::is_latest, news_model::NewsModel, papers_model::PapersModel,
+    },
 };
 
 pub enum Message {
-    // save to db
-    RSSFetched(Vec<NewsModel>),
-    RequireNewsContent(NewsModel),
+    // save news to db
+    NewsRSSFetched(Vec<NewsModel>),
+    NewsContentRequired(NewsModel),
     NewsContentFetched(Vec<String>, NewsModel),
-    // fetch from db
-    FetchedNewsArticles(Vec<NewsModel>),
-    RequireNewsArticles(bool), // latest or not
+    // fetch news from db
+    NewsArticlesFetched(Vec<NewsModel>),
+    NewsArticlesRequired(bool), // latest or not
+    // save papers to db
+    PapersRSSFetched(Vec<PapersModel>),
+    // fetch papers from db
+    PapersDBFetched(Vec<PapersModel>),
+    PapersRequired,
+}
+
+fn handle_message(message: Message, app: &mut App, db: &Db) {
+    match message {
+        // News
+        Message::NewsRSSFetched(items) => {
+            app.news_app.reset_display_items();
+            app.news_app.reload_sidebar();
+            for item in items {
+                let tx_background_fetch = app.tx.clone();
+                tokio::spawn(async move {
+                    tx_background_fetch
+                        .send(Message::NewsContentRequired(item))
+                        .await
+                        .expect("tx_background_fetch failed to send message");
+                });
+            }
+        }
+        Message::NewsContentFetched(content, mut news_model) => {
+            news_model.content = Some(content);
+            db.save_news(news_model);
+        }
+        Message::NewsContentRequired(news_model) => {
+            let tx_fetch_content = app.tx.clone();
+            let category = app.news_app.category.clone();
+            tokio::spawn(async move {
+                News::fetch_article_content(category, &news_model, tx_fetch_content).await;
+            });
+        }
+        Message::NewsArticlesFetched(news_models) => {
+            if news_models.len() == 0 {
+                app.news_app.fetch_news_from_rss(app.tx.clone());
+            } else {
+                app.news_app.items = news_models;
+                app.news_app.reset_display_items();
+                app.news_app.reload_sidebar();
+                app.news_app.sidebar.state.selected = Some(0);
+            }
+        }
+        Message::NewsArticlesRequired(latest) => {
+            if latest {
+                app.news_app.fetch_latest_news_from_db(app.tx.clone(), &db);
+            } else {
+                app.news_app.fetch_news_from_db(app.tx.clone(), &db);
+            }
+        }
+        // Papers
+        Message::PapersRequired => {
+            app.papers_app.fetch_papers_from_db(app.tx.clone(), &db);
+        }
+        Message::PapersRSSFetched(papers_models) => {
+            db.save_papers_batch(papers_models);
+        }
+        Message::PapersDBFetched(papers_models) => {
+            if papers_models.len() == 0 {
+                app.papers_app.fetch_papers_from_rss(app.tx.clone());
+            } else {
+                app.papers_app.items = papers_models;
+                app.papers_app.reset_display_items();
+                app.papers_app.reload_sidebar();
+                app.papers_app.sidebar.state.selected = Some(0);
+            }
+        }
+    }
 }
 
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
@@ -41,54 +115,13 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     // setup app
     let mut app = App::new();
     app.news_app.fetch_news_from_rss(app.tx.clone());
+    app.papers_app.fetch_papers_from_rss(app.tx.clone());
     // setup search area
     let mut search_area = TextArea::default();
     loop {
         // handle async messages
         while let Ok(msg) = app.rx.try_recv() {
-            match msg {
-                Message::RSSFetched(items) => {
-                    app.news_app.reset_display_items();
-                    app.news_app.reload_sidebar();
-                    for item in items {
-                        let tx_background_fetch = app.tx.clone();
-                        tokio::spawn(async move {
-                            tx_background_fetch
-                                .send(Message::RequireNewsContent(item))
-                                .await
-                                .expect("tx_background_fetch failed to send message");
-                        });
-                    }
-                }
-                Message::NewsContentFetched(content, mut news_model) => {
-                    news_model.content = Some(content);
-                    db.save_news(news_model);
-                }
-                Message::RequireNewsContent(news_model) => {
-                    let tx_fetch_content = app.tx.clone();
-                    let category = app.news_app.category.clone();
-                    tokio::spawn(async move {
-                        News::fetch_article_content(category, &news_model, tx_fetch_content).await;
-                    });
-                }
-                Message::FetchedNewsArticles(news_models) => {
-                    if news_models.len() == 0 {
-                        app.news_app.fetch_news_from_rss(app.tx.clone());
-                    } else {
-                        app.news_app.items = news_models;
-                        app.news_app.reset_display_items();
-                        app.news_app.reload_sidebar();
-                        app.news_app.sidebar.state.selected = Some(0);
-                    }
-                }
-                Message::RequireNewsArticles(latest) => {
-                    if latest {
-                        app.news_app.fetch_latest_news_from_db(app.tx.clone(), &db);
-                    } else {
-                        app.news_app.fetch_news_from_db(app.tx.clone(), &db);
-                    }
-                }
-            }
+            handle_message(msg, &mut app, &db);
         }
         // handle input
         if crossterm::event::poll(Duration::from_millis(500))? {
@@ -167,55 +200,76 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                             KeyCode::Char('1') => app.tab = Tab::News,
                             KeyCode::Char('2') => app.tab = Tab::Papers,
                             KeyCode::Char('3') => app.tab = Tab::Custom,
-                            KeyCode::Char('4') => fs::write(
-                                "output.txt",
-                                app.news_app.items[app.news_app.sidebar.state.selected.unwrap()]
-                                    .content
-                                    .clone()
-                                    .unwrap()
-                                    .iter()
-                                    .map(|x| x.to_string())
-                                    .collect::<String>(),
-                            )
-                            .unwrap(),
-                            KeyCode::Char('5') => db.save_news_batch(app.news_app.items.clone()),
-                            KeyCode::Char('6') => app.news_app.fetch_news_from_rss(tx_normal), // reload
+                            KeyCode::Char('4') => db.save_news_batch(app.news_app.items.clone()),
+                            KeyCode::Char('5') => app.news_app.fetch_news_from_rss(tx_normal), // reload
                             KeyCode::Char('c') => {
                                 app.news_app.category.update_source(NewsSource::CNA);
                                 app.news_app.clear_items();
-                                // app.news_app.fetch_news_from_rss(tx_normal);
                             }
                             KeyCode::Char('s') => {
                                 app.news_app
                                     .category
                                     .update_source(NewsSource::StraitsTimes);
                                 app.news_app.clear_items();
-                                // app.news_app.fetch_news_from_rss(tx_normal);
                             }
                             KeyCode::Char('b') => {
                                 app.news_app
                                     .category
                                     .update_source(NewsSource::BusinessTimes);
                                 app.news_app.clear_items();
-                                // app.news_app.fetch_news_from_rss(tx_normal);
+                            }
+                            KeyCode::Char('n') => {
+                                if let Tab::Papers = app.tab {
+                                    if let Some(i) = app.papers_app.sidebar.state.selected {
+                                        webbrowser::open(
+                                            &app.papers_app.items[app.papers_app.display_items[i]]
+                                                .link,
+                                        )
+                                        .unwrap();
+                                    }
+                                }
                             }
                             KeyCode::Char('i') => app.mode = Mode::Insert,
                             KeyCode::Char('v') => app.mode = Mode::Visual,
                             KeyCode::Char('h') => {
                                 app.focused = Focused::Left;
-                                app.news_app.sidebar.focused = true;
+                                match app.tab {
+                                    Tab::News => app.news_app.sidebar.focused = true,
+                                    Tab::Papers => app.papers_app.sidebar.focused = true,
+                                    Tab::Custom => {}
+                                }
                             }
                             KeyCode::Char('l') => {
                                 app.focused = Focused::Right;
-                                app.news_app.sidebar.focused = false;
+                                match app.tab {
+                                    Tab::News => app.news_app.sidebar.focused = false,
+                                    Tab::Papers => app.papers_app.sidebar.focused = false,
+                                    Tab::Custom => {}
+                                }
                             }
                             KeyCode::Char('j') => match app.focused {
-                                Focused::Left => app.news_app.next(),
-                                Focused::Right => app.news_app.scroll_down(),
+                                Focused::Left => match app.tab {
+                                    Tab::News => app.news_app.next(),
+                                    Tab::Papers => app.papers_app.next(),
+                                    Tab::Custom => {}
+                                },
+                                Focused::Right => match app.tab {
+                                    Tab::News => app.news_app.scroll_down(),
+                                    Tab::Papers => app.papers_app.scroll_down(),
+                                    Tab::Custom => {}
+                                },
                             },
                             KeyCode::Char('k') => match app.focused {
-                                Focused::Left => app.news_app.previous(),
-                                Focused::Right => app.news_app.scroll_up(),
+                                Focused::Left => match app.tab {
+                                    Tab::News => app.news_app.previous(),
+                                    Tab::Papers => app.papers_app.previous(),
+                                    Tab::Custom => {}
+                                },
+                                Focused::Right => match app.tab {
+                                    Tab::News => app.news_app.scroll_up(),
+                                    Tab::Papers => app.papers_app.scroll_up(),
+                                    Tab::Custom => {}
+                                },
                             },
                             KeyCode::Char('q') => break Ok(()),
                             _ => {}
@@ -325,8 +379,86 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &mut TextArea) {
                 app.tx.clone(),
             );
         }
-        Tab::Papers => {}
+        Tab::Papers => {
+            render_papers(
+                frame,
+                &mut app.papers_app,
+                body_layout[1],
+                sidebar_layout[1],
+                app.tx.clone(),
+            );
+        }
         Tab::Custom => {}
+    }
+}
+
+fn render_papers(
+    frame: &mut Frame,
+    papers_app: &mut Papers,
+    bottom_layout: Rect,
+    sidebar_list: Rect,
+    tx: Sender<Message>,
+) {
+    frame.render_widget(&mut papers_app.sidebar, sidebar_list);
+    let bottom =
+        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout);
+    let bottom_top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .flex(Flex::SpaceBetween)
+        .split(bottom[0]);
+    let pub_date_rect = bottom_top[0];
+    let link_rect = bottom_top[1];
+    match papers_app.sidebar.state.selected {
+        Some(i) => {
+            let item = &papers_app.items[papers_app.display_items[i]];
+            bordered_block(frame, &item.pub_date, false, pub_date_rect);
+            bordered_block(frame, &item.link, false, link_rect);
+            let viewport_height = bottom[1].height;
+            let inner_width = bottom[1].width.saturating_sub(1);
+            let total_lines: u16 = count_wrapped_lines(&item.summary, inner_width)
+                + (item.summary.chars().filter(|c| *c == '.').count() / 3) as u16;
+            let max_scroll: u16;
+            match papers_app.max_scroll_offsets.get(&i) {
+                Some(scroll_offset) => {
+                    max_scroll = *scroll_offset;
+                }
+                None => {
+                    // Max scroll: how many lines we can scroll before the last line hits bottom
+                    max_scroll = total_lines.saturating_sub(viewport_height);
+                    papers_app.max_scroll_offsets.insert(i, max_scroll);
+
+                    // Clamp scroll_offset in case content changed
+                    if papers_app.scroll_offset > max_scroll {
+                        papers_app.scroll_offset = max_scroll;
+                    }
+                }
+            }
+            frame.render_widget(
+                Paragraph::new(item.summary.clone())
+                    .wrap(Wrap { trim: true })
+                    .scroll((papers_app.scroll_offset, 0))
+                    .block(
+                        Block::new()
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(if !papers_app.sidebar.focused {
+                                Color::Yellow
+                            } else {
+                                Color::Reset
+                            })),
+                    ),
+                bottom[1],
+            );
+
+            if total_lines > viewport_height {
+                let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
+                    .position(papers_app.scroll_offset as usize);
+                let scrollbar =
+                    Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight);
+                frame.render_stateful_widget(scrollbar, bottom[1], &mut scrollbar_state);
+            }
+        }
+        None => {
+            tokio::spawn(async move { tx.send(Message::PapersRequired).await.unwrap() });
+        }
     }
 }
 
@@ -443,7 +575,7 @@ fn render_news(
                     if let Some(i) = news_app.sidebar.state.selected {
                         let news_model = news_app.items[news_app.display_items[i]].clone();
                         tokio::spawn(async move {
-                            tx.send(Message::RequireNewsContent(news_model))
+                            tx.send(Message::NewsContentRequired(news_model))
                                 .await
                                 .unwrap();
                         });
@@ -453,9 +585,11 @@ fn render_news(
         }
         None => {
             let latest = is_latest(news_app.category.get_current());
-            tokio::spawn(
-                async move { tx.send(Message::RequireNewsArticles(latest)).await.unwrap() },
-            );
+            tokio::spawn(async move {
+                tx.send(Message::NewsArticlesRequired(latest))
+                    .await
+                    .unwrap()
+            });
         }
     }
 }

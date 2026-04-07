@@ -1,7 +1,4 @@
-use std::{
-    clone,
-    fmt::{self},
-};
+use std::fmt::{self};
 
 use rss::Channel;
 use scraper::{Html, Selector};

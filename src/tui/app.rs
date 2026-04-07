@@ -1,6 +1,9 @@
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::tui::{display::Message, tabs::news::News};
+use crate::tui::{
+    display::Message,
+    tabs::{news::News, papers::Papers},
+};
 
 pub enum Focused {
     Left,
@@ -25,7 +28,7 @@ pub struct App {
     pub mode: Mode,
     pub tab: Tab,
     pub news_app: News,
-    // pub papers_app: Papers,
+    pub papers_app: Papers,
     // pub custom_app: Custom,
     pub tx: Sender<Message>,
     pub rx: Receiver<Message>,
@@ -39,6 +42,7 @@ impl App {
             mode: Mode::Normal,
             tab: Tab::News,
             news_app: News::new(),
+            papers_app: Papers::new(),
             tx,
             rx,
         }
