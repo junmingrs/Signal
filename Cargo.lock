@@ -2513,7 +2513,6 @@ dependencies = [
  "reqwest",
  "rss",
  "scraper",
- "serde",
  "sqlite",
  "tokio",
  "tui-widget-list",

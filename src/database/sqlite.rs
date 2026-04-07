@@ -2,10 +2,7 @@ use ::sqlite::Connection;
 use sqlite::Row;
 
 use crate::{
-    tui::tabs::{
-        news::{NewsCategory, NewsCategoryKind, NewsSource},
-        papers,
-    },
+    tui::tabs::news::{NewsCategory, NewsCategoryKind, NewsSource},
     utils::{
         news_model::NewsModel,
         papers_model::PapersModel,
@@ -146,15 +143,6 @@ impl Db {
             news_models.push(self.parse_news_model(row));
         }
         news_models
-    }
-    pub fn check_news_exist(&self, news: &NewsModel) -> bool {
-        let check_query = "SELECT 1 FROM news WHERE title = ?";
-        let mut statement = self.connection.prepare(check_query).unwrap();
-        statement.bind((1, news.title.as_str())).unwrap();
-        match statement.next().unwrap() {
-            sqlite::State::Row => true,
-            sqlite::State::Done => false,
-        }
     }
     fn parse_news_model(&self, row: Row) -> NewsModel {
         let fetch_categories_query = "SELECT * FROM news_category WHERE news_id = ?";

@@ -64,7 +64,7 @@ impl CNA {
     const TODAY_URL: &str =
         "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=679471";
     pub async fn fetch_category(category: &NewsCategoryCNA) -> String {
-        reqwest::get(match category {
+        match reqwest::get(match category {
             NewsCategoryCNA::Latest => Self::LATEST_NEWS_URL,
             NewsCategoryCNA::Asia => Self::ASIA_URL,
             NewsCategoryCNA::Business => Self::BUSINESS_URL,
@@ -74,10 +74,10 @@ impl CNA {
             NewsCategoryCNA::Today => Self::TODAY_URL,
         })
         .await
-        .expect("Failed to fetch category")
-        .text()
-        .await
-        .expect("Failed to get body of data")
+        {
+            Ok(r) => r.text().await.unwrap(),
+            Err(_) => String::new(),
+        }
     }
     pub async fn fetch_page(url: &String) -> String {
         reqwest::get(url)
@@ -88,6 +88,9 @@ impl CNA {
             .expect("Failed to get body of data")
     }
     pub fn parse(xml_response: String) -> Vec<NewsModel> {
+        if xml_response.is_empty() {
+            return Vec::new();
+        }
         let channel = Channel::read_from(xml_response.as_bytes()).unwrap();
         channel
             .items
@@ -114,16 +117,6 @@ impl CNA {
                 }
             })
             .collect()
-        // for (idx, cnamodel) in a.iter().enumerate() {
-        //     println!("iter: {}", idx);
-        //     println!("title: {}", cnamodel.title);
-        //     println!("description: {}", cnamodel.description);
-        //     println!("link: {}", cnamodel.link);
-        //     println!("pub_date: {}", cnamodel.pub_date);
-        //     for category in cnamodel.categories.iter() {
-        //         println!("categories: {}", category);
-        //     }
-        // }
     }
     pub fn webscrape(xml_response: &String) -> Html {
         Html::parse_document(xml_response)

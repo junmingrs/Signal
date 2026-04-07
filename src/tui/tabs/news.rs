@@ -216,6 +216,12 @@ impl News {
             .unwrap();
         });
     }
+    pub fn get_current_news(&self) -> Option<&NewsModel> {
+        match self.sidebar.state.selected {
+            Some(i) => Some(&self.items[self.display_items[i]]),
+            None => None,
+        }
+    }
     pub fn clear_items(&mut self) {
         self.items = Vec::new();
         self.sidebar.state.selected = None;

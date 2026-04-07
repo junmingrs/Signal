@@ -20,7 +20,6 @@ pub enum Mode {
 pub enum Tab {
     News,
     Papers,
-    Custom,
 }
 
 pub struct App {
@@ -29,7 +28,6 @@ pub struct App {
     pub tab: Tab,
     pub news_app: News,
     pub papers_app: Papers,
-    // pub custom_app: Custom,
     pub tx: Sender<Message>,
     pub rx: Receiver<Message>,
 }

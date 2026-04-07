@@ -29,35 +29,25 @@ A terminal-based news reader built with **Rust** and **ratatui**
 
 ### 🔵 Planned: Papers Section
 
-* [ ] Fetch research papers (e.g. arXiv or other APIs)
-* [ ] Parse and display paper metadata:
-
+* [x] Fetch research papers (e.g. arXiv or other APIs)
+* [x] Parse and display paper metadata:
   * Title
   * Authors
   * Abstract
   * Publication date
-* [ ] Add category filtering (e.g. CS, Math, Physics)
-
----
-
-### 🟣 Planned: Custom Feeds
-
-* [ ] Allow user-defined RSS feeds
-* [ ] Add/remove feeds dynamically
 
 ---
 
 ### ⚙️ Architecture Improvements
 
 * [x] Background fetching with async tasks (non-blocking UI)
-* [ ] Better state management (separate UI vs data state)
 * [x] Storing fetched data
 
 ---
 
 ### 🚀 Future Ideas
 
-* [ ] Offline mode with cached articles
+* [x] Offline mode with cached articles
 * [ ] Notifications for new articles
 * [ ] Bookmarking / saving articles
 * [ ] Keyboard shortcut customization

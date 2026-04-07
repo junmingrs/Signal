@@ -6,14 +6,15 @@ pub struct Arxiv;
 
 impl Arxiv {
     pub async fn fetch_rss() -> String {
-        reqwest::get("https://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=10")
-            .await
-            .expect("Failed to fetch papers")
-            .text()
-            .await
-            .expect("Failed to get body of data")
+        match reqwest::get("https://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=10").await {
+            Ok(r) => { r.text().await.unwrap() }
+            Err(_) => { String::new() }
+        }
     }
     pub fn parse(xml_response: String) -> Vec<PapersModel> {
+        if xml_response.is_empty() {
+            return Vec::new();
+        }
         let feed = xml_response.parse::<Feed>().unwrap();
         feed.entries
             .iter()

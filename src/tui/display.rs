@@ -1,7 +1,4 @@
-use std::{
-    fs::{self},
-    time::Duration,
-};
+use std::time::Duration;
 
 use ratatui::{
     DefaultTerminal, Frame,
@@ -13,7 +10,7 @@ use ratatui::{
     style::{Color, Style, Stylize},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarState, Wrap},
 };
-use ratatui_textarea::{Key, TextArea};
+use ratatui_textarea::TextArea;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
@@ -109,6 +106,11 @@ fn handle_message(message: Message, app: &mut App, db: &Db) {
     }
 }
 
+fn change_source(app: &mut App, source: NewsSource) {
+    app.news_app.category.update_source(source);
+    app.news_app.clear_items();
+}
+
 pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     // setup db
     let db = Db::new();
@@ -183,7 +185,6 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                                     app.news_app.category.set_loaded();
                                 }
                                 Tab::Papers => {}
-                                Tab::Custom => {}
                             },
                             KeyCode::BackTab => match app.tab {
                                 Tab::News => {
@@ -195,30 +196,21 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                                     }
                                 }
                                 Tab::Papers => {}
-                                Tab::Custom => {}
                             },
                             KeyCode::Char('1') => app.tab = Tab::News,
                             KeyCode::Char('2') => app.tab = Tab::Papers,
-                            KeyCode::Char('3') => app.tab = Tab::Custom,
                             KeyCode::Char('4') => db.save_news_batch(app.news_app.items.clone()),
                             KeyCode::Char('5') => app.news_app.fetch_news_from_rss(tx_normal), // reload
                             KeyCode::Char('c') => {
-                                app.news_app.category.update_source(NewsSource::CNA);
-                                app.news_app.clear_items();
+                                change_source(&mut app, NewsSource::CNA);
                             }
                             KeyCode::Char('s') => {
-                                app.news_app
-                                    .category
-                                    .update_source(NewsSource::StraitsTimes);
-                                app.news_app.clear_items();
+                                change_source(&mut app, NewsSource::StraitsTimes);
                             }
                             KeyCode::Char('b') => {
-                                app.news_app
-                                    .category
-                                    .update_source(NewsSource::BusinessTimes);
-                                app.news_app.clear_items();
+                                change_source(&mut app, NewsSource::BusinessTimes);
                             }
-                            KeyCode::Char('n') => {
+                            KeyCode::Char('p') => {
                                 if let Tab::Papers = app.tab {
                                     if let Some(i) = app.papers_app.sidebar.state.selected {
                                         webbrowser::open(
@@ -236,7 +228,6 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                                 match app.tab {
                                     Tab::News => app.news_app.sidebar.focused = true,
                                     Tab::Papers => app.papers_app.sidebar.focused = true,
-                                    Tab::Custom => {}
                                 }
                             }
                             KeyCode::Char('l') => {
@@ -244,31 +235,26 @@ pub fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
                                 match app.tab {
                                     Tab::News => app.news_app.sidebar.focused = false,
                                     Tab::Papers => app.papers_app.sidebar.focused = false,
-                                    Tab::Custom => {}
                                 }
                             }
                             KeyCode::Char('j') => match app.focused {
                                 Focused::Left => match app.tab {
                                     Tab::News => app.news_app.next(),
                                     Tab::Papers => app.papers_app.next(),
-                                    Tab::Custom => {}
                                 },
                                 Focused::Right => match app.tab {
                                     Tab::News => app.news_app.scroll_down(),
                                     Tab::Papers => app.papers_app.scroll_down(),
-                                    Tab::Custom => {}
                                 },
                             },
                             KeyCode::Char('k') => match app.focused {
                                 Focused::Left => match app.tab {
                                     Tab::News => app.news_app.previous(),
                                     Tab::Papers => app.papers_app.previous(),
-                                    Tab::Custom => {}
                                 },
                                 Focused::Right => match app.tab {
                                     Tab::News => app.news_app.scroll_up(),
                                     Tab::Papers => app.papers_app.scroll_up(),
-                                    Tab::Custom => {}
                                 },
                             },
                             KeyCode::Char('q') => break Ok(()),
@@ -349,13 +335,12 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &mut TextArea) {
         false,
         base_layout[0],
     );
-    for (idx, i) in [Tab::News, Tab::Papers, Tab::Custom].iter().enumerate() {
+    for (idx, i) in [Tab::News, Tab::Papers].iter().enumerate() {
         bordered_block(
             frame,
             match i {
                 Tab::News => "News",
                 Tab::Papers => "Papers",
-                Tab::Custom => "Custom",
             },
             if &app.tab == i { true } else { false },
             tab_layout[idx].centered_vertically(Constraint::Length(3)),
@@ -369,12 +354,23 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &mut TextArea) {
         }),
     ));
     frame.render_widget(&*search_area, sidebar_layout[0]);
+    let info_layout =
+        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(body_layout[1]);
+    let pub_date_and_misc_layout =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .flex(Flex::SpaceBetween)
+            .split(info_layout[0]);
+    let pub_date_rect = pub_date_and_misc_layout[0];
+    let misc_rect = pub_date_and_misc_layout[1];
+    let content_rect = info_layout[1];
     match app.tab {
         Tab::News => {
             render_news(
                 frame,
                 &mut app.news_app,
-                body_layout[1],
+                pub_date_rect,
+                misc_rect,
+                content_rect,
                 sidebar_layout[1],
                 app.tx.clone(),
             );
@@ -383,37 +379,33 @@ fn render(frame: &mut Frame, app: &mut App, search_area: &mut TextArea) {
             render_papers(
                 frame,
                 &mut app.papers_app,
-                body_layout[1],
+                pub_date_rect,
+                misc_rect,
+                content_rect,
                 sidebar_layout[1],
                 app.tx.clone(),
             );
         }
-        Tab::Custom => {}
     }
 }
 
 fn render_papers(
     frame: &mut Frame,
     papers_app: &mut Papers,
-    bottom_layout: Rect,
+    pub_date_rect: Rect,
+    link_rect: Rect,
+    content_rect: Rect,
     sidebar_list: Rect,
     tx: Sender<Message>,
 ) {
     frame.render_widget(&mut papers_app.sidebar, sidebar_list);
-    let bottom =
-        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout);
-    let bottom_top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .flex(Flex::SpaceBetween)
-        .split(bottom[0]);
-    let pub_date_rect = bottom_top[0];
-    let link_rect = bottom_top[1];
     match papers_app.sidebar.state.selected {
         Some(i) => {
             let item = &papers_app.items[papers_app.display_items[i]];
             bordered_block(frame, &item.pub_date, false, pub_date_rect);
             bordered_block(frame, &item.link, false, link_rect);
-            let viewport_height = bottom[1].height;
-            let inner_width = bottom[1].width.saturating_sub(1);
+            let viewport_height = content_rect.height;
+            let inner_width = content_rect.width.saturating_sub(1);
             let total_lines: u16 = count_wrapped_lines(&item.summary, inner_width)
                 + (item.summary.chars().filter(|c| *c == '.').count() / 3) as u16;
             let max_scroll: u16;
@@ -445,7 +437,7 @@ fn render_papers(
                                 Color::Reset
                             })),
                     ),
-                bottom[1],
+                content_rect,
             );
 
             if total_lines > viewport_height {
@@ -453,7 +445,7 @@ fn render_papers(
                     .position(papers_app.scroll_offset as usize);
                 let scrollbar =
                     Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight);
-                frame.render_stateful_widget(scrollbar, bottom[1], &mut scrollbar_state);
+                frame.render_stateful_widget(scrollbar, content_rect, &mut scrollbar_state);
             }
         }
         None => {
@@ -465,19 +457,15 @@ fn render_papers(
 fn render_news(
     frame: &mut Frame,
     news_app: &mut News,
-    bottom_layout: Rect,
+    pub_date_rect: Rect,
+    category_rect: Rect,
+    content_rect: Rect,
     sidebar_list: Rect,
     tx: Sender<Message>,
 ) {
     let sidebar_category_list =
         Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(sidebar_list);
     frame.render_widget(&mut news_app.sidebar, sidebar_category_list[1]);
-
-    let bottom =
-        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).split(bottom_layout);
-    let bottom_top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .flex(Flex::SpaceBetween)
-        .split(bottom[0]);
 
     let category_and_source =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -503,44 +491,33 @@ fn render_news(
         category_and_source[1],
     );
 
-    match news_app.sidebar.state.selected {
-        Some(i) => {
-            if news_app.display_items.len() == 0 || news_app.items.len() == 0 {
-                return;
-            }
-            match &news_app.items[news_app.display_items[i]].content {
+    let news = news_app.get_current_news();
+    match news {
+        Some(item) => {
+            match item.content.clone() {
                 Some(content) => {
-                    bordered_block(
-                        frame,
-                        &news_app.items[news_app.display_items[i]].pub_date,
-                        false,
-                        bottom_top[0],
-                    );
-                    bordered_block(
-                        frame,
-                        &news_app.items[news_app.display_items[i]]
-                            .categories
-                            .join(", "),
-                        false,
-                        bottom_top[1],
-                    );
-
-                    let viewport_height = bottom[1].height;
-                    let inner_width = bottom[1].width.saturating_sub(1);
+                    bordered_block(frame, &item.pub_date, false, pub_date_rect);
+                    bordered_block(frame, &item.categories.join(", "), false, category_rect);
+                    let viewport_height = content_rect.height;
+                    let inner_width = content_rect.width.saturating_sub(1);
                     let total_lines: u16 = content
                         .iter()
                         .map(|c| count_wrapped_lines(c, inner_width))
                         .sum::<u16>()
                         + (content.len().saturating_sub(1) as u16);
                     let max_scroll: u16;
-                    match news_app.max_scroll_offsets.get(&i) {
+                    let idx = match news_app.sidebar.state.selected {
+                        Some(i) => i,
+                        None => return,
+                    };
+                    match news_app.max_scroll_offsets.get(&idx) {
                         Some(scroll_offset) => {
                             max_scroll = *scroll_offset;
                         }
                         None => {
                             // Max scroll: how many lines we can scroll before the last line hits bottom
                             max_scroll = total_lines.saturating_sub(viewport_height);
-                            news_app.max_scroll_offsets.insert(i, max_scroll);
+                            news_app.max_scroll_offsets.insert(idx, max_scroll);
 
                             // Clamp scroll_offset in case content changed
                             if news_app.scroll_offset > max_scroll {
@@ -560,26 +537,23 @@ fn render_news(
                                     Color::Reset
                                 }),
                             )),
-                        bottom[1],
+                        content_rect,
                     );
-
                     if total_lines > viewport_height {
                         let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
                             .position(news_app.scroll_offset as usize);
                         let scrollbar =
                             Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight);
-                        frame.render_stateful_widget(scrollbar, bottom[1], &mut scrollbar_state);
+                        frame.render_stateful_widget(scrollbar, content_rect, &mut scrollbar_state);
                     }
                 }
                 None => {
-                    if let Some(i) = news_app.sidebar.state.selected {
-                        let news_model = news_app.items[news_app.display_items[i]].clone();
-                        tokio::spawn(async move {
-                            tx.send(Message::NewsContentRequired(news_model))
-                                .await
-                                .unwrap();
-                        });
-                    }
+                    let item_clone = item.clone();
+                    tokio::spawn(async move {
+                        tx.send(Message::NewsContentRequired(item_clone))
+                            .await
+                            .unwrap();
+                    });
                 }
             }
         }

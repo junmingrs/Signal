@@ -1,8 +1,4 @@
-use std::{
-    fmt::{self},
-    fs::{self, OpenOptions},
-    io::Write,
-};
+use std::fmt::{self};
 
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 use rss::Channel;
@@ -83,7 +79,7 @@ impl ST {
             .build()
             .unwrap();
 
-        let res = client
+        match client
             .get(match category {
                 NewsCategoryST::Singapore => Self::SINGAPORE_URL,
                 NewsCategoryST::Asia => Self::ASIA_URL,
@@ -96,9 +92,10 @@ impl ST {
             })
             .send()
             .await
-            .unwrap();
-
-        res.text().await.unwrap()
+        {
+            Ok(r) => r.text().await.unwrap(),
+            Err(_) => String::new(),
+        }
     }
     pub async fn fetch_page(url: &String) -> String {
         let mut headers = HeaderMap::new();
@@ -123,9 +120,11 @@ impl ST {
             .await
             .expect("Failed to get body of data");
         res.text().await.unwrap()
-        // fs::write("text.txt", t.clone()).unwrap();
     }
     pub fn parse(xml_response: String, news_category: NewsCategoryST) -> Vec<NewsModel> {
+        if xml_response.is_empty() {
+            return Vec::new();
+        }
         let channel = Channel::read_from(xml_response.as_bytes()).unwrap();
         channel
             .items
@@ -148,22 +147,6 @@ impl ST {
                 }
             })
             .collect()
-        // let mut file = OpenOptions::new()
-        //     .append(true)
-        //     .create(true)
-        //     .write(true)
-        //     .open("debug.txt")
-        //     .unwrap();
-        // for (idx, cnamodel) in a.iter().enumerate() {
-        //     writeln!(&mut file, "iter: {}", idx).unwrap();
-        //     writeln!(&mut file, "title: {}", cnamodel.title).unwrap();
-        //     writeln!(&mut file, "description: {}", cnamodel.description).unwrap();
-        //     writeln!(&mut file, "link: {}", cnamodel.link).unwrap();
-        //     writeln!(&mut file, "pub_date: {}", cnamodel.pub_date).unwrap();
-        //     for category in cnamodel.categories.iter() {
-        //         writeln!(&mut file, "categories: {}", category).unwrap();
-        //     }
-        // }
     }
     pub fn webscrape(xml_response: &String) -> Html {
         Html::parse_document(xml_response)
