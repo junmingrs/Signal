@@ -1,6 +1,6 @@
-# News TUI (Ratatui + Rust)
+# News + Research Paper TUI (Ratatui + Rust)
 
-A terminal-based news reader built with **Rust** and **ratatui**
+A terminal-based news and research paper reader built with **Rust** and **ratatui**
 
 ---
 
