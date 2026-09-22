@@ -31,7 +31,7 @@ impl Widget for ListItem {
 }
 
 pub struct Sidebar {
-    pub titles: Vec<String>,
+    pub display_titles: Vec<String>,
     pub state: ListState,
     pub focused: bool,
 }
@@ -39,14 +39,14 @@ pub struct Sidebar {
 impl Widget for &mut Sidebar {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let builder = ListBuilder::new(|context| {
-            let mut item = ListItem::new(self.titles[context.index].clone());
+            let mut item = ListItem::new(self.display_titles[context.index].clone());
             if context.is_selected {
                 item.style = Style::default().fg(Color::Yellow);
             };
             let main_axis_size = 5;
             (item, main_axis_size)
         });
-        let item_count = self.titles.len();
+        let item_count = self.display_titles.len();
         let list = ListView::new(builder, item_count).block(
             Block::default()
                 .borders(Borders::ALL)

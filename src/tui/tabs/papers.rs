@@ -4,7 +4,6 @@ use tokio::sync::mpsc::Sender;
 use tui_widget_list::ListState;
 
 use crate::{
-    database::sqlite::Db,
     services::arxiv::Arxiv,
     tui::display::Message,
     utils::{papers_model::PapersModel, sidebar::Sidebar},
@@ -26,7 +25,7 @@ impl Papers {
             items: Vec::new(),
             display_items: Vec::new(),
             sidebar: Sidebar {
-                titles: Vec::new(),
+                display_titles: Vec::new(),
                 state,
                 focused: true,
             },
@@ -38,23 +37,15 @@ impl Papers {
         let xml_response = Arxiv::fetch_rss().await;
         Arxiv::parse(xml_response.clone())
     }
-    pub fn fetch_papers_from_db(&mut self, tx: Sender<Message>, db: &Db) {
-        let papers_model = db.fetch_papers();
-        tokio::spawn(async move {
-            tx.send(Message::PapersDBFetched(papers_model))
-                .await
-                .unwrap()
-        });
-    }
-    pub fn fetch_papers_from_rss(&mut self, tx: Sender<Message>) {
-        tokio::spawn(async move {
-            tx.send(Message::PapersRSSFetched(
-                Self::fetch_titles_from_rss().await,
-            ))
-            .await
-            .unwrap();
-        });
-    }
+    // pub fn fetch_papers_from_rss(&mut self, tx: Sender<Message>) {
+    //     tokio::spawn(async move {
+    //         tx.send(Message::PapersRSSFetched(
+    //             Self::fetch_titles_from_rss().await,
+    //         ))
+    //         .await
+    //         .unwrap();
+    //     });
+    // }
     pub fn reset_display_items(&mut self) {
         let mut items_index = Vec::new();
         for i in 0..self.items.len() {
@@ -67,7 +58,7 @@ impl Papers {
         for i in self.display_items.iter() {
             items.push(self.items[*i].title.clone());
         }
-        self.sidebar.titles = items;
+        self.sidebar.display_titles = items;
     }
     pub fn next(&mut self) {
         if self.display_items.len() == 0 {

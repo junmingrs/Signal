@@ -1,226 +1,123 @@
 use std::{collections::HashMap, fmt};
 
 use crate::{
-    database::sqlite::Db,
     services::{
         businesstimes::{BT, NewsCategoryBT},
         cna::{CNA, NewsCategoryCNA},
         straitstimes::{NewsCategoryST, ST},
     },
-    tui::display::Message,
-    utils::{news_model::NewsModel, sidebar::Sidebar},
+    utils::{article::Article, sidebar::Sidebar},
 };
-use tokio::sync::mpsc::Sender;
 use tui_widget_list::ListState;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum NewsSource {
-    CNA,
-    StraitsTimes,
-    BusinessTimes,
-}
-
-impl fmt::Display for NewsSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            NewsSource::CNA => "CNA",
-            NewsSource::StraitsTimes => "StraitsTimes",
-            NewsSource::BusinessTimes => "BusinessTimes",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum NewsCategoryKind {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NewsSourceEnum {
     CNA(NewsCategoryCNA),
-    ST(NewsCategoryST),
-    BT(NewsCategoryBT),
+    StraitsTimes(NewsCategoryST),
+    BusinessTimes(NewsCategoryBT),
 }
 
-impl fmt::Display for NewsCategoryKind {
+impl fmt::Display for NewsSourceEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            NewsCategoryKind::CNA(_) => "CNA",
-            NewsCategoryKind::ST(_) => "ST",
-            NewsCategoryKind::BT(_) => "BT",
+            NewsSourceEnum::CNA(_) => "CNA",
+            NewsSourceEnum::StraitsTimes(_) => "StraitsTimes",
+            NewsSourceEnum::BusinessTimes(_) => "BusinessTimes",
         };
         write!(f, "{}", s)
     }
 }
 
-#[derive(Clone)]
-pub struct NewsCategory {
-    pub source: NewsSource, // use the source to match NewsCategoryKind
-    categories: Vec<NewsCategoryKind>,
-    loaded_categories: Vec<bool>,
-    index: usize, // use index to get category
+#[derive(Copy)]
+pub struct NewsSource {
+    pub source_variant: NewsSourceEnum,
+    category_index: usize,
 }
 
-impl NewsCategory {
-    pub fn new(source: NewsSource) -> Self {
-        let categories = Self::get_categories(&source);
+impl NewsSource {
+    pub fn new(source_variant: NewsSourceEnum) -> Self {
         Self {
-            source,
-            loaded_categories: vec![false; categories.len()],
-            categories: categories,
-            index: 0,
+            source_variant,
+            category_index: 0,
         }
-    }
-    fn get_categories(source: &NewsSource) -> Vec<NewsCategoryKind> {
-        let mut categories: Vec<NewsCategoryKind> = Vec::new();
-        match source {
-            NewsSource::CNA => {
-                for category in NewsCategoryCNA::ALL.iter() {
-                    categories.push(NewsCategoryKind::CNA(*category));
-                }
-            }
-            NewsSource::StraitsTimes => {
-                for category in NewsCategoryST::ALL.iter() {
-                    categories.push(NewsCategoryKind::ST(*category));
-                }
-            }
-            NewsSource::BusinessTimes => {
-                for category in NewsCategoryBT::ALL.iter() {
-                    categories.push(NewsCategoryKind::BT(*category));
-                }
-            }
-        }
-        categories
-    }
-    pub fn update_source(&mut self, source: NewsSource) {
-        self.categories = Self::get_categories(&source);
-        self.source = source;
-        self.loaded_categories = vec![false; self.categories.len()];
-        self.index = 0;
-    }
-    pub fn next(&mut self) {
-        self.index = (self.index + 1) % self.categories.len();
-    }
-    pub fn previous(&mut self) {
-        if self.index == 0 {
-            self.index = self.categories.len() - 1;
-        } else {
-            self.index = (self.index - 1) % self.categories.len();
-        }
-    }
-    pub fn get_current(&self) -> NewsCategoryKind {
-        self.categories[self.index]
-    }
-    pub fn set_loaded(&mut self) {
-        self.loaded_categories[self.index] = true;
-    }
-    pub fn is_loaded(&self) -> bool {
-        self.loaded_categories[self.index]
     }
 }
 
 pub struct News {
-    pub items: Vec<NewsModel>,
-    pub display_items: Vec<usize>, // list of item indices
+    cna: NewsSource,
+    st: NewsSource,
+    bt: NewsSource,
+    current_source: NewsSourceEnum,
     pub sidebar: Sidebar,
-    pub category: NewsCategory,
-    pub scroll_offset: u16,
-    pub max_scroll_offsets: HashMap<usize, u16>,
+    // NOTE: deal with scroll offsets later
+    // pub scroll_offset: u16,
+    // pub max_scroll_offsets: HashMap<usize, u16>,
 }
 
 impl News {
     pub fn new() -> Self {
         let mut state = ListState::default();
         state.select(None);
+        let cna = NewsSource::new(NewsSourceEnum::CNA(NewsCategoryCNA::Latest(None)));
+        let st = NewsSource::new(NewsSourceEnum::StraitsTimes(NewsCategoryST::Singapore(
+            None,
+        )));
+        let bt = NewsSource::new(NewsSourceEnum::BusinessTimes(NewsCategoryBT::Singapore(
+            None,
+        )));
         Self {
-            items: Vec::new(),
-            display_items: Vec::new(),
+            cna,
+            st,
+            bt,
+            current_source: NewsSourceEnum::CNA(NewsCategoryCNA::Latest(None)),
             sidebar: Sidebar {
-                titles: Vec::new(),
+                display_titles: Vec::new(),
                 state,
                 focused: true,
             },
-            category: NewsCategory::new(NewsSource::CNA),
-            scroll_offset: 0,
-            max_scroll_offsets: HashMap::<usize, u16>::new(),
         }
     }
-    pub async fn fetch_titles_from_rss(category: &NewsCategoryKind) -> Vec<NewsModel> {
-        match category {
-            NewsCategoryKind::CNA(cna) => {
+    pub async fn fetch_news(source_variant: NewsSourceEnum) -> Vec<Article> {
+        match source_variant {
+            NewsSourceEnum::CNA(cna) => {
                 let xml_response = CNA::fetch_category(&cna).await;
-                CNA::parse(xml_response.clone())
+                CNA::parse(xml_response.clone()).await
             }
-            NewsCategoryKind::ST(st) => {
+            NewsSourceEnum::StraitsTimes(st) => {
                 let xml_response = ST::fetch_category(&st).await;
-                ST::parse(xml_response.clone(), *st)
+                ST::parse(xml_response.clone(), st).await
             }
-            NewsCategoryKind::BT(bt) => {
+            NewsSourceEnum::BusinessTimes(bt) => {
                 let xml_response = BT::fetch_category(&bt).await;
-                BT::parse(xml_response.clone(), *bt)
+                BT::parse(xml_response.clone(), bt).await
             }
         }
     }
-    pub async fn fetch_article_content(
-        category: NewsCategory,
-        news_model: &NewsModel,
-        tx: Sender<Message>,
-    ) {
-        let content;
-        match category.source {
-            NewsSource::CNA => {
-                let xml_response = CNA::fetch_page(&news_model.link).await;
-                let document = CNA::webscrape(&xml_response);
-                content = CNA::get_content(document);
-            }
-            NewsSource::StraitsTimes => {
-                let xml_response = ST::fetch_page(&news_model.link).await;
-                let document = ST::webscrape(&xml_response);
-                content = ST::get_content(document);
-            }
-            NewsSource::BusinessTimes => {
-                let xml_response = BT::fetch_page(&news_model.link).await;
-                let document = BT::webscrape(&xml_response);
-                content = BT::get_content(document);
-            }
+    pub fn get_current_news_source(&self) -> &NewsSource {
+        match self.current_source {
+            NewsSourceEnum::CNA(_) => &self.cna,
+            NewsSourceEnum::StraitsTimes(_) => &self.st,
+            NewsSourceEnum::BusinessTimes(_) => &self.bt,
         }
-        let model = news_model.clone();
-        tokio::spawn(async move {
-            tx.send(Message::NewsContentFetched(content, model))
-                .await
-                .expect("Could not fetch content");
-        });
     }
-    pub fn fetch_news_from_db(&mut self, tx: Sender<Message>, db: &Db) {
-        let category = self.category.clone();
-        let news_models = db.fetch_news_by_source_and_category(&category);
-        tokio::spawn(async move {
-            tx.send(Message::NewsArticlesFetched(news_models))
-                .await
-                .unwrap()
-        });
-    }
-    pub fn fetch_latest_news_from_db(&mut self, tx: Sender<Message>, db: &Db) {
-        let news_source = self.category.source.clone();
-        let news_models = db.fetch_latest_news_by_source(news_source);
-        tokio::spawn(async move {
-            tx.send(Message::NewsArticlesFetched(news_models))
-                .await
-                .unwrap()
-        });
-    }
-    pub fn fetch_news_from_rss(&mut self, tx: Sender<Message>) {
-        let category = self.category.clone();
-        let category_kind = category.get_current();
-        tokio::spawn(async move {
-            tx.send(Message::NewsRSSFetched(
-                Self::fetch_titles_from_rss(&category_kind).await,
-            ))
-            .await
-            .unwrap();
-        });
-    }
-    pub fn get_current_news(&self) -> Option<&NewsModel> {
-        match self.sidebar.state.selected {
-            Some(i) => Some(&self.items[self.display_items[i]]),
-            None => None,
+    pub fn update_source_articles(&mut self, articles: Vec<Article>) {
+        match self.current_source {
+            NewsSourceEnum::CNA(cna) => cna.update_articles(articles),
+            NewsSourceEnum::StraitsTimes(st) => &self.st,
+            NewsSourceEnum::BusinessTimes(bt) => bt.,
         }
+    }
+    // NOTE: assume always selected
+    pub fn get_current_article(&self) -> &Article {
+        &self.items[self.display_items[self
+            .sidebar
+            .state
+            .selected
+            .expect("Assumed state is always selected")]]
+        // match self.sidebar.state.selected {
+        //     Some(i) => Some(&self.items[self.display_items[i]]),
+        //     None => None,
+        // }
     }
     pub fn clear_items(&mut self) {
         self.items = Vec::new();
@@ -234,11 +131,11 @@ impl News {
         self.display_items = items_index; // maybe refactor to a oneliner
     }
     pub fn reload_sidebar(&mut self) {
-        let mut items: Vec<String> = Vec::new();
+        let mut titles: Vec<String> = Vec::new();
         for i in self.display_items.iter() {
-            items.push(self.items[*i].title.clone());
+            titles.push(self.items[*i].title.clone());
         }
-        self.sidebar.titles = items;
+        self.sidebar.display_titles = titles;
     }
     pub fn update_news_category(&mut self, next: bool) {
         if next {
@@ -248,7 +145,7 @@ impl News {
         }
     }
     pub fn next(&mut self) {
-        if self.display_items.len() == 0 {
+        if self.display_items.is_empty() {
             return;
         }
         let i = match self.sidebar.state.selected {
@@ -265,7 +162,7 @@ impl News {
         self.scroll_offset = 0;
     }
     pub fn previous(&mut self) {
-        if self.display_items.len() == 0 {
+        if self.display_items.is_empty() {
             return;
         }
         let i = match self.sidebar.state.selected {
@@ -282,12 +179,11 @@ impl News {
         self.scroll_offset = 0;
     }
     pub fn scroll_down(&mut self) {
-        if let Some(i) = self.sidebar.state.selected {
-            if let Some(max) = self.max_scroll_offsets.get(&i) {
-                if self.scroll_offset < *max {
-                    self.scroll_offset += 1;
-                }
-            }
+        if let Some(i) = self.sidebar.state.selected
+            && let Some(max) = self.max_scroll_offsets.get(&i)
+            && self.scroll_offset < *max
+        {
+            self.scroll_offset += 1;
         }
     }
     pub fn scroll_up(&mut self) {

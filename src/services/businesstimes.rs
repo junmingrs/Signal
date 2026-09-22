@@ -1,44 +1,43 @@
 use std::fmt::{self};
 
-use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 use rss::Channel;
 use scraper::{Html, Selector};
 
 use crate::{
     tui::tabs::news::NewsSource,
-    utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom},
+    utils::{article::Article, header::get_default_headers, time_formatter::rfc2822_to_custom},
 };
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum NewsCategoryBT {
-    Singapore,
-    International,
-    Opinion,
-    Market,
-    Technology,
-    Awards,
+    Singapore(Option<Vec<Article>>),
+    International(Option<Vec<Article>>),
+    Opinion(Option<Vec<Article>>),
+    Market(Option<Vec<Article>>),
+    Technology(Option<Vec<Article>>),
+    Awards(Option<Vec<Article>>),
 }
 
 impl NewsCategoryBT {
     pub const ALL: [NewsCategoryBT; 6] = [
-        NewsCategoryBT::Singapore,
-        NewsCategoryBT::International,
-        NewsCategoryBT::Opinion,
-        NewsCategoryBT::Market,
-        NewsCategoryBT::Technology,
-        NewsCategoryBT::Awards,
+        NewsCategoryBT::Singapore(None),
+        NewsCategoryBT::International(None),
+        NewsCategoryBT::Opinion(None),
+        NewsCategoryBT::Market(None),
+        NewsCategoryBT::Technology(None),
+        NewsCategoryBT::Awards(None),
     ];
 }
 
 impl fmt::Display for NewsCategoryBT {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            NewsCategoryBT::Singapore => "Singapore",
-            NewsCategoryBT::International => "International",
-            NewsCategoryBT::Opinion => "Opinion",
-            NewsCategoryBT::Market => "Market",
-            NewsCategoryBT::Technology => "Technology",
-            NewsCategoryBT::Awards => "Awards",
+            NewsCategoryBT::Singapore(_) => "Singapore",
+            NewsCategoryBT::International(_) => "International",
+            NewsCategoryBT::Opinion(_) => "Opinion",
+            NewsCategoryBT::Market(_) => "Market",
+            NewsCategoryBT::Technology(_) => "Technology",
+            NewsCategoryBT::Awards(_) => "Awards",
         };
         write!(f, "{}", s)
     }
@@ -54,17 +53,7 @@ impl BT {
     const TECHNOLOGY_URL: &str = "https://www.businesstimes.com.sg/rss/startups-tech";
     const AWARDS_URL: &str = "https://www.businesstimes.com.sg/rss/events-awards";
     pub async fn fetch_category(category: &NewsCategoryBT) -> String {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            USER_AGENT,
-            HeaderValue::from_static(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
-            ),
-        );
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/rss+xml, application/xml;q=0.9, */*;q=0.8"),
-        );
+        let headers = get_default_headers();
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
@@ -73,12 +62,12 @@ impl BT {
 
         match client
             .get(match category {
-                NewsCategoryBT::Singapore => Self::SINGAPORE_URL,
-                NewsCategoryBT::International => Self::INTERNATIONAL_URL,
-                NewsCategoryBT::Opinion => Self::OPINION_URL,
-                NewsCategoryBT::Market => Self::MARKET_URL,
-                NewsCategoryBT::Technology => Self::TECHNOLOGY_URL,
-                NewsCategoryBT::Awards => Self::AWARDS_URL,
+                NewsCategoryBT::Singapore(_) => Self::SINGAPORE_URL,
+                NewsCategoryBT::International(_) => Self::INTERNATIONAL_URL,
+                NewsCategoryBT::Opinion(_) => Self::OPINION_URL,
+                NewsCategoryBT::Market(_) => Self::MARKET_URL,
+                NewsCategoryBT::Technology(_) => Self::TECHNOLOGY_URL,
+                NewsCategoryBT::Awards(_) => Self::AWARDS_URL,
             })
             .send()
             .await
@@ -88,17 +77,7 @@ impl BT {
         }
     }
     pub async fn fetch_page(url: &String) -> String {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            USER_AGENT,
-            HeaderValue::from_static(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
-            ),
-        );
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/rss+xml, application/xml;q=0.9, */*;q=0.8"),
-        );
+        let headers = get_default_headers();
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
@@ -111,32 +90,34 @@ impl BT {
             .expect("Failed to get body of data");
         res.text().await.unwrap()
     }
-    pub fn parse(xml_response: String, news_category: NewsCategoryBT) -> Vec<NewsModel> {
+    pub async fn parse(xml_response: String, news_category: NewsCategoryBT) -> Vec<Article> {
         if xml_response.is_empty() {
             return Vec::new();
         }
+
+        let mut news_models = Vec::new();
         let channel = Channel::read_from(xml_response.as_bytes()).unwrap();
-        channel
-            .items
-            .iter()
-            .map(|item| {
-                let cloned_item = item.clone();
-                let title = cloned_item.title.unwrap_or("".to_string());
-                let description = cloned_item.description.unwrap_or("".to_string());
-                let link = cloned_item.link.unwrap_or("".to_string());
-                let pub_date = cloned_item.pub_date.unwrap_or("".to_string());
-                let formatted_pub_date = rfc2822_to_custom(pub_date);
-                NewsModel {
-                    title,
-                    description,
-                    content: None,
-                    link,
-                    pub_date: formatted_pub_date,
-                    categories: vec![news_category.to_string()],
-                    source: NewsSource::BusinessTimes,
-                }
-            })
-            .collect()
+        for item in channel.items {
+            let cloned_item = item.clone();
+            let title = cloned_item.title.unwrap_or("".to_string());
+            let description = cloned_item.description.unwrap_or("".to_string());
+            let link = cloned_item.link.unwrap_or("".to_string());
+            let pub_date = cloned_item.pub_date.unwrap_or("".to_string());
+            let formatted_pub_date = rfc2822_to_custom(pub_date);
+            let page = Self::fetch_page(&link).await;
+            let document = Self::webscrape(&page);
+            let content = Self::get_content(document);
+            news_models.push(Article {
+                title,
+                description,
+                content,
+                link,
+                pub_date: formatted_pub_date,
+                categories: vec![news_category.to_string()],
+                source: NewsSource::BusinessTimes,
+            });
+        }
+        news_models
     }
     pub fn webscrape(xml_response: &String) -> Html {
         Html::parse_document(xml_response)

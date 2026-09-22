@@ -1,7 +1,6 @@
-mod tui;
 mod services;
+mod tui;
 mod utils;
-mod database;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

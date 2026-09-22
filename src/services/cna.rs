@@ -4,43 +4,57 @@ use rss::Channel;
 use scraper::{Html, Selector};
 
 use crate::{
-    tui::tabs::news::NewsSource,
-    utils::{news_model::NewsModel, time_formatter::rfc2822_to_custom},
+    tui::tabs::news::{Article, NewsSource},
+    utils::{article::Article, time_formatter::rfc2822_to_custom},
 };
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Copy, PartialEq, Debug)]
 pub enum NewsCategoryCNA {
-    Latest,
-    Asia,
-    Business,
-    Singapore,
-    Sports,
-    World,
-    Today,
+    Latest(Option<Vec<Article>>),
+    Asia(Option<Vec<Article>>),
+    Business(Option<Vec<Article>>),
+    Singapore(Option<Vec<Article>>),
+    Sports(Option<Vec<Article>>),
+    World(Option<Vec<Article>>),
+    Today(Option<Vec<Article>>),
 }
 
 impl NewsCategoryCNA {
     pub const ALL: [NewsCategoryCNA; 7] = [
-        NewsCategoryCNA::Latest,
-        NewsCategoryCNA::Asia,
-        NewsCategoryCNA::Business,
-        NewsCategoryCNA::Singapore,
-        NewsCategoryCNA::Sports,
-        NewsCategoryCNA::World,
-        NewsCategoryCNA::Today,
+        NewsCategoryCNA::Latest(None),
+        NewsCategoryCNA::Asia(None),
+        NewsCategoryCNA::Business(None),
+        NewsCategoryCNA::Singapore(None),
+        NewsCategoryCNA::Sports(None),
+        NewsCategoryCNA::World(None),
+        NewsCategoryCNA::Today(None),
     ];
+
+    pub fn update_articles(&mut self, articles: Vec<Article>) {
+        match self {
+            NewsCategoryCNA::Latest(articles_opt)
+            | NewsCategoryCNA::Asia(articles_opt)
+            | NewsCategoryCNA::Business(articles_opt)
+            | NewsCategoryCNA::Singapore(articles_opt)
+            | NewsCategoryCNA::Sports(articles_opt)
+            | NewsCategoryCNA::World(articles_opt)
+            | NewsCategoryCNA::Today(articles_opt) => {
+                *articles_opt = Some(articles);
+            }
+        }
+    }
 }
 
 impl fmt::Display for NewsCategoryCNA {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            NewsCategoryCNA::Latest => "Latest",
-            NewsCategoryCNA::Asia => "Asia",
-            NewsCategoryCNA::Business => "Business",
-            NewsCategoryCNA::Singapore => "Singapore",
-            NewsCategoryCNA::Sports => "Sports",
-            NewsCategoryCNA::World => "World",
-            NewsCategoryCNA::Today => "Today",
+            NewsCategoryCNA::Latest(_) => "Latest",
+            NewsCategoryCNA::Asia(_) => "Asia",
+            NewsCategoryCNA::Business(_) => "Business",
+            NewsCategoryCNA::Singapore(_) => "Singapore",
+            NewsCategoryCNA::Sports(_) => "Sports",
+            NewsCategoryCNA::World(_) => "World",
+            NewsCategoryCNA::Today(_) => "Today",
         };
         write!(f, "{}", s)
     }
@@ -65,13 +79,13 @@ impl CNA {
         "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=679471";
     pub async fn fetch_category(category: &NewsCategoryCNA) -> String {
         match reqwest::get(match category {
-            NewsCategoryCNA::Latest => Self::LATEST_NEWS_URL,
-            NewsCategoryCNA::Asia => Self::ASIA_URL,
-            NewsCategoryCNA::Business => Self::BUSINESS_URL,
-            NewsCategoryCNA::Singapore => Self::SINGAPORE_URL,
-            NewsCategoryCNA::Sports => Self::SPORT_URL,
-            NewsCategoryCNA::World => Self::WORLD_URL,
-            NewsCategoryCNA::Today => Self::TODAY_URL,
+            NewsCategoryCNA::Latest(_) => Self::LATEST_NEWS_URL,
+            NewsCategoryCNA::Asia(_) => Self::ASIA_URL,
+            NewsCategoryCNA::Business(_) => Self::BUSINESS_URL,
+            NewsCategoryCNA::Singapore(_) => Self::SINGAPORE_URL,
+            NewsCategoryCNA::Sports(_) => Self::SPORT_URL,
+            NewsCategoryCNA::World(_) => Self::WORLD_URL,
+            NewsCategoryCNA::Today(_) => Self::TODAY_URL,
         })
         .await
         {
@@ -87,36 +101,39 @@ impl CNA {
             .await
             .expect("Failed to get body of data")
     }
-    pub fn parse(xml_response: String) -> Vec<NewsModel> {
+    pub async fn parse(xml_response: String) -> Vec<Article> {
         if xml_response.is_empty() {
             return Vec::new();
         }
+
+        let mut news_models = Vec::new();
         let channel = Channel::read_from(xml_response.as_bytes()).unwrap();
-        channel
-            .items
-            .iter()
-            .map(|item| {
-                let cloned_item = item.clone();
-                let title = cloned_item.title.unwrap_or("".to_string());
-                let description = cloned_item.description.unwrap_or("".to_string());
-                let link = cloned_item.link.unwrap_or("".to_string());
-                let pub_date = cloned_item.pub_date.unwrap_or("".to_string());
-                let formatted_pub_date = rfc2822_to_custom(pub_date);
-                let categories = cloned_item.categories;
-                NewsModel {
-                    title,
-                    description,
-                    content: None,
-                    link,
-                    pub_date: formatted_pub_date,
-                    categories: categories
-                        .iter()
-                        .map(|c| c.name.split(" ,").collect::<Vec<_>>().join(", "))
-                        .collect(),
-                    source: NewsSource::CNA,
-                }
-            })
-            .collect()
+        for item in channel.items {
+            let title = item.title.unwrap_or("".to_string());
+            let description = item.description.unwrap_or("".to_string());
+            let link = item.link.unwrap_or("".to_string());
+            let pub_date = item.pub_date.unwrap_or("".to_string());
+            let formatted_pub_date = rfc2822_to_custom(pub_date);
+            let categories = item
+                .categories
+                .iter()
+                .map(|c| c.name.split(" ,").collect::<Vec<_>>().join(", "))
+                .collect();
+
+            let page = Self::fetch_page(&link).await;
+            let document = Self::webscrape(&page);
+            let content = Self::get_content(document);
+            news_models.push(Article {
+                title,
+                description,
+                content,
+                link,
+                pub_date: formatted_pub_date,
+                categories,
+                source: NewsSource::CNA,
+            });
+        }
+        news_models
     }
     pub fn webscrape(xml_response: &String) -> Html {
         Html::parse_document(xml_response)
